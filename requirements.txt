@@ -1,0 +1,9 @@
+# Core
+torch
+
+# Medical Imaging
+SimpleITK
+
+# Data
+numpy
+pandas
