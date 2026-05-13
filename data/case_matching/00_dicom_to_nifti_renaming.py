@@ -371,6 +371,6 @@ def convert_dataset(parent_dir, output_dir):
 # RUN
 # -------------------------
 convert_dataset(
-    parent_dir="/deepstore/datasets/mia/AI4EVAR/raw_data/RADAR_XNat/data/d",
-    output_dir="/deepstore/datasets/mia/AI4EVAR/raw_data/RADAR_XNat/imagesTr"
+    parent_dir="/deepstore/datasets/mia/AI4EVAR/raw_data/RADAR_XNat/data_pre-op",
+    output_dir="/deepstore/datasets/mia/AI4EVAR/raw_data/RADAR_XNat/imagesTr_pre-op"
 )

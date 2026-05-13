@@ -219,38 +219,36 @@ def build_multimodal_dataset(sav_path, image_dir, cfd_dir, output_json):
     cfd_files = get_file_map(cfd_dir)
 
     # Ground truth definitions
-    # comp_patterns = {
-    #     "endoleak": r"Endograft_Spc.*answer0",
-    #     "migration": r"Endograft_Spc.*answer1",
-    #     "component_separation": r"Endograft_Spc.*answer2",
-    #     "kinking": r"Endograft_Spc.*answer3",
-    #     "occlusion": r"Endograft_Spc.*answer4",
-    #     "stenosis": r"Endograft_Spc.*answer5",
-    #     "aneurysm_rupture": r"Endograft_Spc.*answer6",
-    #     "infection": r"Endograft_Spc.*answer7"
-    # }
-
     comp_patterns = {
-        "endoleak": r"Endograft_Spc.*answer0",            # 0.0 = Endoleak
-        "migration": r"Endograft_Spc.*answer1",           # 1.0 = Endograft migration
-        "infection": r"Endograft_Spc.*answer2",           # 2.0 = Endograft infection
-        "erosion": r"Endograft_Spc.*answer3",             # 3.0 = Device erosion
-        "limb_obstruction": r"Endograft_Spc.*answer4",    # 4.0 = Endograft limb obstruction
-        "claudication": r"Endograft_Spc.*answer5",        # 5.0 = Buttock/leg claudication
-        "occlusion": r"^Occlusion(_\d+)*$",               # Dedicated Occlusion columns
-        "rupture": r"Endograft_Spc.*answer6"              # This was "Bleeding" in the list, verify if Rupture is separate
+        # --- ENDOLEAKS (Granular) ---
+        "endoleak_1a": r"Endoleak_spec_.*answer0",
+        "endoleak_1b": r"Endoleak_spec_.*answer(1|2)",
+        "endoleak_2":  r"Endoleak_spec_.*answer(3|4|5|6)",
+        "endoleak_3":  r"Endoleak_spec_.*answer(7|8)",
+        "endoleak_5":  r"Endoleak_spec_.*answer11",
+        
+        # --- PATENCY & MECHANICAL ---
+        "occlusion": r"Occlusion_",
+        "stenosis":  r"Stenosis_",
+        "kinking":   r"Kinking_",
+        "fracture":  r"Fract_",
+        
+        # --- ENDOGRAFT SPECIFIC ---
+        "migration": r"Endograft_Spc.*answer1",
+        "infection": r"Endograft_Spc.*answer2",
     }
 
     final_data = {}
     stats = {k: 0 for k in list(comp_patterns.keys()) + ["total", "reint", "death", "death_surg", "death_hosp",\
-             "sac regression (using max)", "stable sac (using max)", "sac expansion (using max)", "sac regression (using min)", "stable sac (using min)", "sac expansion (using min)"]}
+             "sac_measured", "sac_regression", "sac_stable", "sac_expansion"]}
     matched_df_list = []
 
     # Pre-op / Post-op feature split
     pre_op_cols = [
         c for c in df.columns
-        if (c.startswith('Bl_') or c in ['Sexe', 'Age', 'Weight', 'Height'])
-        and "_AE_SAE_" not in c
+        if (c.startswith('Bl_')) or c in ['PatientNr', 'CreatedInSite', 'Site', 'Height']
+        # if (c.startswith('Bl_') or c in ['Sexe', 'Age', 'Weight', 'Height'])
+        # and "_AE_SAE_" not in c
     ]
 
     post_op_cols = [
@@ -278,10 +276,16 @@ def build_multimodal_dataset(sav_path, image_dir, cfd_dir, output_json):
             if patient_row_df.empty:
                 continue
 
+            row = patient_row_df.iloc[0]
+            # if int(row.get('P_IP_P_DT')) == 9: 
+            #     # 9 is Vascutek Anaconda graft type which is no longer used
+            #     # ONLY matters for Post-op model
+            #     # For pre-op we use every case we can get
+            #     continue
+
             # Optional CFD (NOT required)
             cfd_fname = find_matching_cfd(cfd_files, spss_id, site_name)
 
-            row = patient_row_df.iloc[0]
             matched_df_list.append(patient_row_df)
 
             # ---- Ground truth extraction ----
@@ -311,53 +315,61 @@ def build_multimodal_dataset(sav_path, image_dir, cfd_dir, output_json):
             # reg = int(not pd.isna(diam_diff) and diam_diff <= -5.0)
             # stable = int(not pd.isna(diam_diff) and diam_diff >= 0.0)
 
-            # ---- Manual Sac Dynamics Calculation ----
-            # 1. Identify Baseline Diameter
-            # We prioritize the three specific fields mentioned: Bl_AAAdiam, Bl_Bl_Im_CTA_AAAdiam, Bl_Bl_Im_US_AAAdiam
-            # We also include a general regex for any other "Baseline" diameter tags found in the mapping
-            baseline_patterns = [
-                'Bl_AAAdiam', 
-                'Bl_Bl_Im_CTA_AAAdiam', 
-                'Bl_Bl_Im_US_AAAdiam',
-                r'CTA_AAAdiam', # standard mapping tag
-                r'US_AAAdiam'   # standard mapping tag[cite: 1, 3]
-            ]
-            
-            baseline_vals = []
-            for pat in baseline_patterns:
-                # Find columns matching the specific name or pattern
-                cols = [c for c in df.columns if re.search(pat, c, re.I)]
-                for c in cols:
-                    val = row.get(c)
-                    if pd.notna(val):
-                        baseline_vals.append(float(val))
-            
-            # Use the largest available baseline diameter as the reference[cite: 1, 3]
-            baseline_ref = max(baseline_vals) if baseline_vals else None
-            
-            # 2. Identify Follow-up Diameters
-            # We look for all tags starting with 'F' (Follow-up) followed by 'AAAdiam'
-            fu_regex = r'^(F.*AAAdiam|.*AAAdiam_.*(1yr|6m|12m|yr))'
-            fu_cols = [c for c in df.columns if re.search(fu_regex, c, re.I) and 'NE' not in c]
-            fu_values = [float(row.get(c)) for c in fu_cols if pd.notna(row.get(c))]
-            
-            if baseline_ref is not None and fu_values:
-                # To identify regression or expansion risk, we compare against the MAX follow-up size[cite: 1, 3]
-                min_fu_diam = min(fu_values)    # Use minmum diameter detected during Follow-Up
-                max_fu_diam = max(fu_values)    # Use maximum diameter detected during Follow-Up
-                diam_diff_using_max = max_fu_diam - baseline_ref
-                diam_diff_using_min = min_fu_diam - baseline_ref
-                # print(f"Patient {spss_id} | Baseline: {baseline_ref} | Max FU: {max_fu_diam} | Min FU: {min_fu_diam} | Diff: {diam_diff}")
+            # ---- Sac Dynamics Calculation (same-modality pairs preferred) ----
+            # Per PI guidance: CT-CT > US-US > CT-US (cross-modality worst case).
+            # Baseline: Bl.*CTA.*AAAdiam (CT) | Bl.*(?:US|DUS).*AAAdiam (US) | Bl_AAAdiam (generic)
+            # Follow-up: CTA columns (CT) | DUS|_US_ columns (US)
+            # FU candidates sorted by embedded visit number; latest non-null value used.
+            # Regression: diff <= -5 mm | Stable: |diff| < 5 mm | Expansion: diff >= 5 mm
 
-            # 3. Assign Clinical Labels
-            # Regression: Decrease of 5mm or more
-            # Stable/Expansion: No change or any increase
-            reg_using_max = int(diam_diff_using_max is not None and diam_diff_using_max <= -5.0)
-            reg_using_min = int(diam_diff_using_min is not None and diam_diff_using_min <= -5.0)
-            stable_using_max = int(diam_diff_using_max is not None and diam_diff_using_max == 0.0)
-            stable_using_min = int(diam_diff_using_min is not None and diam_diff_using_min == 0.0)
-            expansion_using_max = int(diam_diff_using_max is not None and diam_diff_using_max > 0.0)
-            expansion_using_min = int(diam_diff_using_min is not None and diam_diff_using_min > 0.0)
+            bl_ct_cols = [c for c in df.columns if re.search(r'Bl.*CTA.*AAAdiam', c, re.I)]
+            bl_ct = next((float(row.get(c)) for c in bl_ct_cols if pd.notna(row.get(c))), None)
+
+            bl_us_cols = [c for c in df.columns if re.search(r'Bl.*(?:US|DUS).*AAAdiam', c, re.I)]
+            bl_us = next((float(row.get(c)) for c in bl_us_cols if pd.notna(row.get(c))), None)
+
+            fu_cands_ct, fu_cands_us = [], []
+            for c in df.columns:
+                if 'NE' in c or 'AAAdiam' not in c or c.startswith('Bl_'):
+                    continue
+                m = re.search(r'FU(\d+)', c, re.I) or re.search(r'(\d+)yr', c, re.I)
+                if not m:
+                    continue
+                visit_num = int(m.group(1))
+                if re.search(r'CTA', c, re.I):
+                    fu_cands_ct.append((c, visit_num))
+                elif re.search(r'DUS|_US_', c, re.I):
+                    fu_cands_us.append((c, visit_num))
+
+            fu_cands_ct.sort(key=lambda x: x[1], reverse=True)
+            fu_cands_us.sort(key=lambda x: x[1], reverse=True)
+            fu_ct = next((float(row.get(c)) for c, _ in fu_cands_ct if pd.notna(row.get(c))), None)
+            fu_us = next((float(row.get(c)) for c, _ in fu_cands_us if pd.notna(row.get(c))), None)
+
+            if bl_ct is not None and fu_ct is not None:       # CT-CT (best)
+                bl_val, fu_val = bl_ct, fu_ct
+            elif bl_us is not None and fu_us is not None:     # US-US (second)
+                bl_val, fu_val = bl_us, fu_us
+            else:                                              # CT-US fallback (worst case)
+                if bl_ct is None and bl_us is None:
+                    bl_gen_cols = [c for c in df.columns if re.search(r'^Bl_AAAdiam$', c)]
+                    bl_val = next((float(row.get(c)) for c in bl_gen_cols if pd.notna(row.get(c))), None)
+                else:
+                    bl_val = bl_ct if bl_ct is not None else bl_us
+                fu_val = fu_ct if fu_ct is not None else fu_us
+            
+            # NOTE: Missing diameter values are expected for some patients, especially if they were lost to follow-up or if measurements were not taken.
+            # Not every patient has a diameter baseline reported. There are also patients which have a baseline diameter but no FU diameter is reported.
+            # if bl_val is None:
+            #     print(f"  WARNING: no baseline diam found for {spss_id}")
+            # if fu_val is None:
+            #     print(f"  INFO: no FU diam found for {spss_id} (bl={bl_val})")
+
+            diam_diff = (fu_val - bl_val) if (bl_val is not None and fu_val is not None) else None
+
+            sac_regression = int(diam_diff is not None and diam_diff <= -5.0)
+            sac_stable     = int(diam_diff is not None and -5.0 < diam_diff < 5.0)
+            sac_expansion  = int(diam_diff is not None and diam_diff >= 5.0)
 
             gt_comps = {}
             for label, pattern in comp_patterns.items():
@@ -371,12 +383,10 @@ def build_multimodal_dataset(sav_path, image_dir, cfd_dir, output_json):
             stats["death_surg"] += has_death_surg
             stats["death_hosp"] += has_death_hosp
             stats["death"] += has_death
-            stats["sac regression (using max)"] += reg_using_max
-            stats["stable sac (using max)"] += stable_using_max
-            stats["sac expansion (using max)"] += expansion_using_max
-            stats["sac regression (using min)"] += reg_using_min
-            stats["stable sac (using min)"] += stable_using_min
-            stats["sac expansion (using min)"] += expansion_using_min
+            stats["sac_measured"]   += int(diam_diff is not None)
+            stats["sac_regression"] += sac_regression
+            stats["sac_stable"]     += sac_stable
+            stats["sac_expansion"]  += sac_expansion    # diff ≥ +5
             unique_key = f"{spss_id}_{site_abbr}"
 
             # ---- Final structured record ----
@@ -404,14 +414,10 @@ def build_multimodal_dataset(sav_path, image_dir, cfd_dir, output_json):
                     "death": has_death,
                     "death_surg": has_death_surg,
                     "death_hosp": has_death_hosp,
-                    "sac_regression_using_max": reg_using_max,
-                    "stable_sac_using_max": stable_using_max,
-                    "sac_expansion_using_max": expansion_using_max,
-                    "sac_regression_using_min": reg_using_min,
-                    "stable_sac_using_min": stable_using_min,
-                    "sac_expansion_using_min": expansion_using_min,
-                    "diam_diff_using_max": serialize_value(diam_diff_using_max),
-                    "diam_diff_using_min": serialize_value(diam_diff_using_min),
+                    "sac_regression": sac_regression,
+                    "sac_stable": sac_stable,
+                    "sac_expansion": sac_expansion,
+                    "diam_diff": serialize_value(diam_diff),
                     **gt_comps
                 }
             }
@@ -447,20 +453,24 @@ def build_multimodal_dataset(sav_path, image_dir, cfd_dir, output_json):
 
         print("\nGROUND TRUTH SUMMARY")
         print("-" * 95)
+        sac_keys = {"sac_regression", "sac_stable", "sac_expansion"}
+        sac_n = stats["sac_measured"] or 1
         for k, v in stats.items():
-            if k == "total":
+            if k in ("total", "sac_measured"):
                 continue
-            print(f"{k:40} | {v:<10} | {(v/stats['total'])*100:.1f}%")
+            denom = sac_n if k in sac_keys else stats["total"]
+            label = f" (of {stats['sac_measured']} with measurement)" if k in sac_keys else ""
+            print(f"{k:40} | {v:<10} | {(v/denom)*100:.1f}%{label}")
 
+        print(f"{'sac_measured':40} | {stats['sac_measured']:<10} | {(stats['sac_measured']/stats['total'])*100:.1f}% of total")
         print("=" * 95)
-
 
 # =====================================================
 # EXECUTION
 # =====================================================
 build_multimodal_dataset(
     "/deepstore/datasets/mia/AI4EVAR/raw_data/RADAR_XNat/1. RADAR_datebase_ARTinEVAR_v4, incl Bl_AAAdiam voor oude Rijnstate patienten.sav",
-    "/deepstore/datasets/mia/AI4EVAR/raw_data/RADAR_XNat/imagesTr",
+    "/deepstore/datasets/mia/AI4EVAR/raw_data/RADAR_XNat/imagesTr_pre-op",
     "/deepstore/datasets/mia/AI4EVAR/raw_data/CFDs/renamed",
     "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1/clinical_data/radar_multimodal_config_v1.json"
 )

@@ -34,16 +34,17 @@ source activate ai4evar
 # -------------------------
 # Run data preparation pipeline
 # -------------------------
-srun -u $HOME/.conda/envs/SIRE-opt/bin/python -m 00_dicom_to_nifti_renaming 
-srun -u $HOME/.conda/envs/SIRE-opt/bin/python -m 01_cfd_name_cleaning 
-srun -u $HOME/.conda/envs/SIRE-opt/bin/python -m 02_data_matching_v1 
-srun -u $HOME/.conda/envs/SIRE-opt/bin/python -m 03_data_organizing 
-srun -u $HOME/.conda/envs/SIRE-opt/bin/python -m 04_nnUNet_labels_metrics_generation \
+# srun -u $HOME/.conda/envs/SIRE-opt/bin/python -m 00_dicom_to_nifti_renaming 
+# srun -u $HOME/.conda/envs/SIRE-opt/bin/python -m 01_cfd_name_cleaning 
+# srun -u $HOME/.conda/envs/SIRE-opt/bin/python -m 02_umcg_name_cleaning 
+# srun -u $HOME/.conda/envs/SIRE-opt/bin/python -m 03_data_matching_v1 
+srun -u $HOME/.conda/envs/SIRE-opt/bin/python -m 04_data_organizing 
+srun -u $HOME/.conda/envs/SIRE-opt/bin/python -m 05_nnUNet_labels_metrics_generation \
     --input "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1/imagesTr" \
     --output-dir "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1" \
     --checkpoint-dir "/deepstore/datasets/mia/AI4EVAR/nnUNet/nnUNet_results/Dataset001_AAA_RADAR" \
     --device "cuda"
-srun -u $HOME/.conda/envs/SIRE-opt/bin/python -m 05_generate_data_split 
+srun -u $HOME/.conda/envs/SIRE-opt/bin/python -m 06_generate_data_split 
 
 echo $'\n--------------SLURM JOB FINISHED-----------------'
 elapsed_time=$(($SECONDS - start_time))

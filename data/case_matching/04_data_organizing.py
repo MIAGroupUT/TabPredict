@@ -54,7 +54,6 @@ def organize_multimodal_dataset(
     -----
     - CFD files are OPTIONAL (may be None in metadata).
     - Missing modalities are skipped with warnings.
-    - Output filenames are normalized as PATIENT_{id}.nii.gz
     """
 
     with open(config_json, 'r') as f:
@@ -133,7 +132,7 @@ def organize_multimodal_dataset(
 # ---------------------------------------------------------
 CONFIG_PATH = "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1/clinical_data/radar_multimodal_config_v1.json"
 
-SRC_IMG = "/deepstore/datasets/mia/AI4EVAR/raw_data/RADAR_XNat/imagesTr"
+SRC_IMG = "/deepstore/datasets/mia/AI4EVAR/raw_data/RADAR_XNat/imagesTr_pre-op"
 SRC_LBL = None
 SRC_CFD = "/deepstore/datasets/mia/AI4EVAR/raw_data/CFDs/renamed"
 
