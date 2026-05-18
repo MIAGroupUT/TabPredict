@@ -1,0 +1,63 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Experiment: v1_no_complications
+# Model:      Reintervention risk prediction — primary task only
+#             CTA (Merlin ViT + LoRA) + clinical tabular + AAA geometry metrics
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: v1_no_complications
+version: 1
+description: >
+  Primary-task-only reintervention risk model.
+  No complication sub-tasks. Trains faster and produces a cleaner AUC signal.
+  Use as the baseline; compare against v1_with_complications.
+
+model:
+  with_complications: false
+  complications: []           # empty → no complications_head; forward returns 2 tensors
+  lora_r: 8
+  aaa_dim: 5
+  # clinical_dim is inferred at runtime from the config JSON feature keys
+
+training:
+  seed: 3299
+  batch_size: 8
+  num_workers: 16
+  image_size: [128, 128, 128]
+  voxel_spacing: [1.5, 1.5, 1.5]
+  hu_range: [-200, 400]
+  train_cache_rate: 0.5
+  val_cache_rate: 1.0
+
+  # Loss hyperparameters
+  focal_gamma: 2.0
+  label_smoothing: 0.05
+  pos_weight: 1.0            # WeightedRandomSampler already balances ~50/50
+  gate_l1_weight: 0.001      # L1 sparsity on learned feature gate
+
+  # Causal modality dropout (Stage B only)
+  modality_dropout:
+    p_cta: 0.10
+    p_aaa_given_cta: 0.15
+    p_aaa_given_clin: 0.15
+
+  stages:
+    - name: A
+      epochs: 40
+      patience: 8
+      T_0: 20               # CosineAnnealingWarmRestarts period
+      # Stage A: Merlin frozen; fusion + clinical + AAA branches warm up
+
+    - name: B
+      epochs: 120
+      patience: 12
+      T_0: 30
+      # Stage B: LoRA adapters unfrozen; condition_net re-initialised
+
+paths:
+  base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
+  cache_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/monai_cache
+  checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_no_complications
+
+wandb:
+  project: AAA-Reintervention-Risk
+  run_name: v1_no_complications

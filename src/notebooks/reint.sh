@@ -22,15 +22,15 @@ export TORCH_CUDNN_V8_API_ENABLED=1
 export PYTHONUNBUFFERED=1
 
 # cd $HOME/SIRE                   # Changes to your project directory
-cd $HOME/AI4EVAR/ai4evar/notebooks
+cd $HOME/AI4EVAR/ai4evar/src/notebooks
 
 # 3. Run Python inside the conda environment WITHOUT activating it
 start_time=$SECONDS
 echo $'\n--------------SLURM JOB STARTED-----------------'
 
 # srun -u $HOME/.conda/envs/ai4evar/bin/python -m "reintervention"
-srun -u $HOME/.conda/envs/ai4evar/bin/python -m "reintervention_no_physics_no_complications"
-# srun -u $HOME/.conda/envs/ai4evar/bin/python -m "reintervention_with_complications"
+# srun -u $HOME/.conda/envs/ai4evar/bin/python -m "reintervention_no_physics_no_complications"
+srun -u $HOME/.conda/envs/ai4evar/bin/python -m "reintervention_with_complications"
 
 echo $'\n--------------SLURM JOB FINISHED-----------------'
 elapsed_time=$(($SECONDS - $start_time))

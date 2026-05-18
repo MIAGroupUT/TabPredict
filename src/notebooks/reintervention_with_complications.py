@@ -402,13 +402,13 @@ class ReinterventionRiskModel(nn.Module):
         # Reintervention
         reint_out    = self.reintervention_head(fused)
         reint_logit  = reint_out[:, 0:1]
-        reint_logvar = torch.clamp(reint_out[:, 1:2], -5, 5)
+        reint_logvar = torch.clamp(reint_out[:, 1:2], -2, 2)
 
         # Complications: (B, C*2) → (B, C, 2) → split logit / logvar
         comp_out    = self.complications_head(fused)
         comp_out    = comp_out.view(comp_out.size(0), self.num_complications, 2)
         comp_logits = comp_out[:, :, 0]                       # (B, C)
-        comp_logvar = torch.clamp(comp_out[:, :, 1], -5, 5)  # (B, C)
+        comp_logvar = torch.clamp(comp_out[:, :, 1], -2, 2)  # (B, C)
 
         return reint_logit, reint_logvar, comp_logits, comp_logvar
 
@@ -451,12 +451,14 @@ class MultiTaskReinterventionLoss(nn.Module):
 
     def _heteroscedastic(self, logit, logvar, gt, pos_weight=None):
         """Heteroscedastic binary focal loss.
-        Clamp logvar (not precision) so gradients always flow; -6 ≈ conf 0.95 ceiling.
+        Clamp matches forward clamp (-2, 2) so precision <= exp(2) ~ 7.4x.
+        L2 term prevents logvar collapsing to the boundary.
         """
-        bce      = self._focal_bce_per_sample(logit, gt, pos_weight)
-        logvar_c = logvar.clamp(min=-6.0)
+        bce       = self._focal_bce_per_sample(logit, gt, pos_weight)
+        logvar_c  = logvar.clamp(-2.0, 2.0)
         precision = torch.exp(-logvar_c)
-        return (precision * bce).mean() + 0.5 * logvar.mean()
+        return (precision * bce).mean() + 0.5 * logvar.mean() \
+               + 0.05 * logvar.pow(2).mean()
 
     def forward(self, reint_logit, reint_logvar, comp_logits, comp_logvar, reint_gt, comp_gt):
         # --- Reintervention heteroscedastic focal loss ---
@@ -851,10 +853,17 @@ def set_stage_b(model):
 
     Adds LoRA adapters at very low LR on top of the stable Stage A fusion.
     Everything else continues at low LR.
+    The condition_net is re-initialised so the Stage A clinical bias does not
+    suppress the visual pathway once LoRA features become available.
     """
     model = get_model(model)
     for p in model.parameters():
         p.requires_grad = False
+
+    # Reset FiLM condition network so it relearns with LoRA visual features.
+    for m in model.condition_net.modules():
+        if hasattr(m, 'reset_parameters'):
+            m.reset_parameters()
 
     # Same as Stage A
     for p in model.cta_adapter.parameters():

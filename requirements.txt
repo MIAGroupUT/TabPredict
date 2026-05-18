@@ -1,5 +1,8 @@
 # Core
 torch
+monai
+
+pytest
 
 # Medical Imaging
 SimpleITK

@@ -494,7 +494,7 @@ class ReinterventionRiskModel(nn.Module):
         reint_output = self.reintervention_head(fused)  
         reint_logit = reint_output[:, 0:1]
         reint_logvar = reint_output[:, 1:2]
-        reint_logvar = torch.clamp(reint_logvar, -5, 5)
+        reint_logvar = torch.clamp(reint_logvar, -2, 2)
        
         if return_uncertainties:
             return reint_logit, reint_logvar
@@ -520,11 +520,12 @@ class ReinterventionLoss(nn.Module):
         pt = p * reint_gt + (1 - p) * (1 - reint_gt)
         per_sample = (1 - pt).pow(self.focal_gamma) * bce  # (B, 1)
 
-        # Heteroscedastic: equilibrium at logvar = log(2 * per_sample_loss).
-        # Clamp logvar (not precision) so gradients always flow; -6 ≈ conf 0.95 ceiling.
-        logvar_c  = reint_logvar.clamp(min=-6.0)
+        # Heteroscedastic NLL. Clamp matches forward clamp (-2, 2) so precision ≤ exp(2) ≈ 7.4×.
+        # L2 term softly penalises |logvar| so it cannot collapse to the boundary.
+        logvar_c  = reint_logvar.clamp(-2.0, 2.0)
         precision = torch.exp(-logvar_c)
-        total = (precision * per_sample).mean() + 0.5 * reint_logvar.mean()
+        total = (precision * per_sample).mean() + 0.5 * reint_logvar.mean() \
+                + 0.05 * reint_logvar.pow(2).mean()
 
         return total, {
             "loss_total": total.item(),
@@ -921,11 +922,18 @@ def set_stage_b(model):
 
     Adds LoRA adapter training on top of Stage A. Very low LR for LoRA
     to avoid destabilizing the stable fusion learned in Stage A.
+    The condition_net is re-initialised so that the Stage A clinical bias
+    does not suppress the visual pathway once LoRA features become available.
     """
     model = get_model(model)
     # Start by freezing everything, then selectively open the gates
     for p in model.parameters():
         p.requires_grad = False
+
+    # Reset FiLM condition network so it relearns with LoRA visual features.
+    for m in model.condition_net.modules():
+        if hasattr(m, 'reset_parameters'):
+            m.reset_parameters()
         
     # Unfreeze Tabular Pathways
     model.feature_gate.requires_grad = True

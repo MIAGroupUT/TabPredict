@@ -1,0 +1,74 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Experiment: v1_with_complications
+# Model:      Multi-task reintervention + per-complication prediction
+#             Same backbone as v1_no_complications + complications_head
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: v1_with_complications
+version: 1
+description: >
+  Multi-task model predicting reintervention risk AND the probability of each
+  individual complication (endoleaks, migration, infection).
+  Complication logits provide XAI-grade attribution for the main prediction.
+
+model:
+  with_complications: true
+  complications:
+    # Endoleaks (granular)
+    - endoleak_1a
+    - endoleak_1b
+    - endoleak_2
+    - endoleak_3
+    - endoleak_5
+    # Endograft-specific
+    - migration
+    - infection
+  lora_r: 8
+  aaa_dim: 5
+
+training:
+  seed: 3299
+  batch_size: 8
+  num_workers: 16
+  image_size: [128, 128, 128]
+  voxel_spacing: [1.5, 1.5, 1.5]
+  hu_range: [-200, 400]
+  train_cache_rate: 0.5
+  val_cache_rate: 1.0
+
+  # Loss hyperparameters
+  focal_gamma: 2.0
+  label_smoothing: 0.05
+  pos_weight_reint: 1.0
+  gate_l1_weight: 0.001
+
+  # comp_weight is set per-stage; low in A (sparse labels + frozen backbone),
+  # higher in B once LoRA visual features are available
+  comp_weight_stage_a: 0.1
+  comp_weight_stage_b: 0.3
+
+  # Causal modality dropout (Stage B only)
+  modality_dropout:
+    p_cta: 0.10
+    p_aaa_given_cta: 0.15
+    p_aaa_given_clin: 0.15
+
+  stages:
+    - name: A
+      epochs: 40
+      patience: 8
+      T_0: 20
+
+    - name: B
+      epochs: 120
+      patience: 12
+      T_0: 30
+
+paths:
+  base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
+  cache_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/monai_cache_comp
+  checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_with_complications
+
+wandb:
+  project: AAA-Reintervention-Risk
+  run_name: v1_with_complications
