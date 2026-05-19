@@ -79,9 +79,9 @@ After concatenating the three branch embeddings (256 + 32 + 32 = **320-dim**), a
 
 ```
 γ, β = condition_net(fused)          # two linear heads
-γ = tanh(γ) × 0.1                   # clamp to (-0.1, +0.1)
+γ = tanh(γ) × 0.1                    # clamp to (-0.1, +0.1)
 β = tanh(β) × 0.1
-fused = (1 + γ) × fused + β         # modulate
+fused = (1 + γ) × fused + β          # modulate
 fused = fusion_norm(fused)           # LayerNorm
 ```
 
