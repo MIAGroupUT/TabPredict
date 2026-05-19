@@ -7,7 +7,25 @@ cd /home/ranema/AI4EVAR/ai4evar
 ~/.conda/envs/ai4evar/bin/python -m pytest tests/ -v
 ```
 
-220 tests, CPU-only, no GPU required, no external data files required, ~20 seconds.
+238 tests, CPU-only, no GPU required, no external data files required, ~20 seconds.
+
+### On SLURM
+
+The suite is designed to run on any SLURM allocation — including GPU nodes. The two trainer/runner test files patch `trainer.DEVICE` and `runner.DEVICE` to `cpu` via an autouse fixture, so they behave identically regardless of whether a GPU is available.
+
+```bash
+sbatch \
+    --job-name=pytest \
+    --output=/home/ranema/AI4EVAR/logs/pytest_%j.log \
+    scripts/submit_slurm.sh train --config experiments/v1_no_complications.yaml
+```
+
+Or directly on a login/CPU node (no `sbatch` needed since there is no GPU dependency):
+
+```bash
+cd /home/ranema/AI4EVAR/ai4evar
+~/.conda/envs/ai4evar/bin/python -m pytest tests/ -v
+```
 
 ### Single file
 
@@ -25,8 +43,8 @@ cd /home/ranema/AI4EVAR/ai4evar
 
 ## Design Principles
 
-- **CPU-only:** All tests run without a GPU. Spatial dimensions are tiny (6³ instead of 128³); batch size is 2.
-- **No external data:** No NIfTI files, no SPSS files, no deepstore access. All data is synthesised in-memory using `tmp_path` fixtures or `torch.rand`.
+- **CPU-only:** All tests run without a GPU. Spatial dimensions are tiny (6³ instead of 128³); batch size is 2. Where source modules select `cuda` at import time (trainer.py, runner.py), the tests patch `DEVICE` to `cpu` via an autouse fixture.
+- **No external data:** No NIfTI files, no SPSS files, no deepstore access. All inputs — including checkpoints — are synthesised in-memory using `tmp_path` fixtures or `torch.rand`. Checkpoints contain randomly-initialised model weights, zero mean vectors, and synthetic feature names; no real patient data.
 - **Heavy-dependency mocks:** `merlin` and `peft` are stubbed out in `conftest.py` via `sys.modules` before any source import. The mock Merlin returns `(B, 2048)` zeros, matching the real backbone's output dimensionality, so the full model graph compiles and runs correctly.
 
 ---
@@ -308,18 +326,55 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 
 ---
 
+### `test_trainer.py` — 12 tests
+
+Tests for `validate()` (trainer.py) and the checkpoint save format.
+
+**SLURM/GPU safety:** An autouse fixture patches `src.training.trainer.DEVICE` to `cpu`, so the tests run identically on CPU-only and GPU-allocated nodes.
+
+**`validate()` — no-complications variant:**
+- Returns `(float, dict)`
+- All 16 required metric keys are present (`val/loss_total`, `val/reint_auc`, `val/reint_best_thresh`, confusion matrix entries, rates, ...)
+- No complication keys leak into the no-comp result
+- AUC, accuracy, and threshold are in [0, 1]; loss is non-negative
+- F-beta threshold (the deployment threshold) is in [0, 1]
+- All-same ground-truth produces AUC = 0.5 (graceful undefined-AUC handling)
+- `wandb.log` is called exactly once per invocation
+
+**`validate()` — with-complications variant:**
+- `val/comp_mean_auc` is present and in [0, 1]
+- Standard reintervention keys are still emitted alongside complication keys
+
+**Checkpoint save format:**
+- Dict produced by trainer.py contains all 7 required keys: `state_dict`, `threshold`, `feature_names`, `clin_mean`, `clin_std`, `complications`, `config`
+- `threshold`, `feature_names`, `clin_mean`, `clin_std` survive a save/load round-trip correctly
+- With-complications checkpoint stores the complication name list
+
+---
+
+### `test_runner.py` — 6 tests
+
+Tests for `run_test()` (evaluation/runner.py) — the full inference pipeline.
+
+**SLURM/GPU safety:** An autouse fixture patches `src.evaluation.runner.DEVICE` to `cpu`.
+
+**Data loading:** `load_splits_and_config`, `build_data_list`, `get_cached_transforms`, `get_val_runtime_transforms`, `CacheDataset`, and `DataLoader` are mocked. The model and checkpoint are real (randomly-initialised weights, no real patient data).
+
+**No-complications variant (2 synthetic patients):**
+- Top-level files created: `test_metrics.json`, `test_metrics.csv`, `test_log.txt`
+- Per-patient directories contain `prediction.json`, `xai.json`, `xai_report.txt`
+- `prediction.json` has all required keys (`pid`, `reintervention_prob`, `reintervention_pred`, `reintervention_gt`, `label_type`, `threshold`, `reint_logvar`) with valid values
+- `test_metrics.json` contains `n_samples`, `auc`, `f1`, `precision`, `recall`, `accuracy`, `threshold_used`; `n_samples == 2`
+
+**With-complications variant (1 synthetic patient):**
+- Per-patient files created
+- `prediction.json` contains `complication_probs` dict keyed by complication name; all values in [0, 1]
+
+---
+
 ## Known Gaps
 
-The following code paths exist in the production code but have no test coverage. This is not necessarily a problem — some are impractical to test without real data or a GPU — but they are worth noting.
-
-### High Priority
-
-| Gap | Why it matters |
-|---|---|
-| **`validate()`** (trainer.py) | The validation loop, metric collection, threshold computation, and W&B logging are exercised every training epoch but never in tests. A bug here would silently produce wrong AUC/threshold values. |
-| **`run_test()`** (runner.py, 233 lines) | Produces all per-patient output files. Not tested beyond importability. A test with a dummy checkpoint and 2-patient synthetic split would cover the whole output pipeline. |
-| **Checkpoint saving format** | Tests verify loading but nothing verifies that the training loop saves all expected keys (`threshold`, `feature_names`, `clin_mean`, `clin_std`, `complications`, `config`). A mismatch would only surface at inference time. |
-| **F-beta threshold selection** | The `best_fbeta` / `best_threshold` PR-curve logic inside the validator is never called in tests. It is the threshold used at deployment. |
+The following code paths have no test coverage. Some are impractical to test without real data or a GPU; others are straightforward additions if needed.
 
 ### Medium Priority
 
