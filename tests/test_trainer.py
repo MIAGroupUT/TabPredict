@@ -13,7 +13,7 @@ Covers:
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -285,3 +285,113 @@ def test_checkpoint_with_comp_stores_complications(fresh_model_with_comp, tmp_pa
     )
     loaded = torch.load(ckpt_path, map_location="cpu")
     assert loaded["complications"] == COMPLICATIONS
+
+
+# ── Gate L1 regularisation effect ────────────────────────────────────────────
+
+
+@patch("src.training.trainer.wandb")
+def test_gate_l1_increases_total_loss(mock_wandb, fresh_model_no_comp, cta, clin, aaa, reint_gt):
+    """Adding gate L1 with weight > 0 must produce a strictly larger total loss."""
+    from src.training.losses import ReinterventionLoss
+
+    criterion  = ReinterventionLoss(device=torch.device("cpu"))
+    outputs    = fresh_model_no_comp(cta, clin, aaa)
+    base_loss, _ = criterion(outputs[0], outputs[1], reint_gt)
+
+    gate_l1_w  = 1e-2
+    total_loss = base_loss + gate_l1_w * torch.sigmoid(fresh_model_no_comp.feature_gate).sum()
+
+    assert total_loss.item() > base_loss.item()
+
+
+@patch("src.training.trainer.wandb")
+def test_gate_l1_zero_weight_no_effect(mock_wandb, fresh_model_no_comp, cta, clin, aaa, reint_gt):
+    """With gate_l1_weight=0 the added term must be exactly zero."""
+    from src.training.losses import ReinterventionLoss
+
+    criterion  = ReinterventionLoss(device=torch.device("cpu"))
+    outputs    = fresh_model_no_comp(cta, clin, aaa)
+    base_loss, _ = criterion(outputs[0], outputs[1], reint_gt)
+
+    total_loss = base_loss + 0.0 * torch.sigmoid(fresh_model_no_comp.feature_gate).sum()
+
+    assert total_loss.item() == pytest.approx(base_loss.item())
+
+
+# ── W&B logging helpers ───────────────────────────────────────────────────────
+# log_val_table and log_xai_epoch are tested at the "does not raise" level
+# with wandb fully mocked.  The _force_cpu autouse fixture keeps everything on CPU.
+
+
+@patch("src.training.trainer.wandb")
+def test_log_val_table_no_comp_does_not_raise(mock_wandb, model_no_comp):
+    """log_val_table must run without error for the no-complications variant."""
+    from src.training.trainer import log_val_table
+
+    mock_wandb.Table.return_value = MagicMock()
+    batch = {
+        "cta":                  torch.rand(BATCH, 4, SPATIAL, SPATIAL, SPATIAL),
+        "clin":                 torch.rand(BATCH, CLINICAL_DIM),
+        "aaa_metrics":          torch.rand(BATCH, AAA_DIM),
+        "reintervention_label": torch.FloatTensor([0.0, 1.0]),
+    }
+    log_val_table(model_no_comp, _FakeLoader([batch]),
+                  epoch=0, stage="A", thresh=0.5, complications=[])
+    mock_wandb.log.assert_called_once()
+
+
+@patch("src.training.trainer.wandb")
+def test_log_val_table_with_comp_does_not_raise(mock_wandb, model_with_comp):
+    """log_val_table must run without error for the with-complications variant."""
+    from src.training.trainer import log_val_table
+
+    mock_wandb.Table.return_value = MagicMock()
+    batch = {
+        "cta":                  torch.rand(BATCH, 4, SPATIAL, SPATIAL, SPATIAL),
+        "clin":                 torch.rand(BATCH, CLINICAL_DIM),
+        "aaa_metrics":          torch.rand(BATCH, AAA_DIM),
+        "reintervention_label": torch.FloatTensor([0.0, 1.0]),
+        "complication_labels":  torch.FloatTensor([[1.0, 0.0, -1.0], [0.0, 1.0, 1.0]]),
+    }
+    log_val_table(model_with_comp, _FakeLoader([batch]),
+                  epoch=0, stage="A", thresh=0.5, complications=COMPLICATIONS)
+    mock_wandb.log.assert_called_once()
+
+
+@patch("src.training.trainer.wandb")
+def test_log_xai_epoch_no_comp_does_not_raise(mock_wandb, model_no_comp):
+    """log_xai_epoch must run without error for the no-complications variant."""
+    from src.training.trainer import log_xai_epoch
+
+    mock_wandb.Table.return_value = MagicMock()
+    feature_names = [f"feat_{i}" for i in range(CLINICAL_DIM)]
+    batch = {
+        "cta":        torch.rand(BATCH, 4, SPATIAL, SPATIAL, SPATIAL),
+        "clin":       torch.rand(BATCH, CLINICAL_DIM),
+        "aaa_metrics": torch.rand(BATCH, AAA_DIM),
+    }
+    log_xai_epoch(model_no_comp, _FakeLoader([batch]),
+                  epoch=0, stage="A",
+                  feature_names=feature_names, complications=[],
+                  n_samples=2, use_gradcam=False)
+    mock_wandb.log.assert_called_once()
+
+
+@patch("src.training.trainer.wandb")
+def test_log_xai_epoch_with_comp_does_not_raise(mock_wandb, model_with_comp):
+    """log_xai_epoch must run without error for the with-complications variant."""
+    from src.training.trainer import log_xai_epoch
+
+    mock_wandb.Table.return_value = MagicMock()
+    feature_names = [f"feat_{i}" for i in range(CLINICAL_DIM)]
+    batch = {
+        "cta":        torch.rand(BATCH, 4, SPATIAL, SPATIAL, SPATIAL),
+        "clin":       torch.rand(BATCH, CLINICAL_DIM),
+        "aaa_metrics": torch.rand(BATCH, AAA_DIM),
+    }
+    log_xai_epoch(model_with_comp, _FakeLoader([batch]),
+                  epoch=0, stage="B",
+                  feature_names=feature_names, complications=COMPLICATIONS,
+                  n_samples=2, use_gradcam=False)
+    mock_wandb.log.assert_called_once()

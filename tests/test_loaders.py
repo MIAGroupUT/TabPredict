@@ -17,9 +17,12 @@ Covers:
 from __future__ import annotations
 
 import json
+from unittest.mock import MagicMock, patch
+
 import numpy as np
 import pytest
 import torch
+from torch.utils.data import WeightedRandomSampler
 
 from tests.conftest import CLINICAL_DIM, AAA_DIM
 
@@ -433,3 +436,88 @@ def test_tensor_keys_with_complications():
     from src.data.loaders import _tensor_keys
     keys = _tensor_keys(True)
     assert "complication_labels" in keys
+
+
+# ── build_loaders ─────────────────────────────────────────────────────────────
+
+
+def _build_loaders_args(tmp_path):
+    """Minimal args for build_loaders: 4 train patients (2 pos / 2 neg) + 2 val."""
+    pids_train = ["T000", "T001", "T002", "T003"]
+    pids_val   = ["V000", "V001"]
+    splits = {"train": pids_train, "val": pids_val, "test": []}
+    config = {
+        pid: {
+            "pre_op_features": {"feat_a": 1.0, "feat_b": 0.5},
+            "ground_truth": {"reintervention": i % 2},
+        }
+        for i, pid in enumerate(pids_train + pids_val)
+    }
+    feature_names = ["feat_a", "feat_b"]
+    clin_mean = np.zeros(2, dtype=np.float32)
+    clin_std  = np.ones(2,  dtype=np.float32)
+    return splits, config, feature_names, clin_mean, clin_std
+
+
+@patch("torch.utils.data.DataLoader")
+@patch("src.data.loaders.CacheDataset")
+def test_build_loaders_returns_two_dataloaders(mock_cache, mock_dl, tmp_path):
+    """build_loaders must return a (train_loader, val_loader) tuple."""
+    from src.data.loaders import build_loaders
+    mock_cache.return_value = MagicMock(__len__=lambda s: 2)
+    splits, config, feature_names, clin_mean, clin_std = _build_loaders_args(tmp_path)
+
+    result = build_loaders(
+        splits, config, feature_names, clin_mean, clin_std,
+        base_dir=tmp_path, cache_dir=tmp_path / "cache", batch_size=2,
+    )
+    assert isinstance(result, tuple) and len(result) == 2
+
+
+@patch("torch.utils.data.DataLoader")
+@patch("src.data.loaders.CacheDataset")
+def test_build_loaders_train_uses_weighted_sampler(mock_cache, mock_dl, tmp_path):
+    """Train DataLoader must be built with a WeightedRandomSampler for class balance."""
+    from src.data.loaders import build_loaders
+    mock_cache.return_value = MagicMock(__len__=lambda s: 4)
+    splits, config, feature_names, clin_mean, clin_std = _build_loaders_args(tmp_path)
+
+    build_loaders(
+        splits, config, feature_names, clin_mean, clin_std,
+        base_dir=tmp_path, cache_dir=tmp_path / "cache", batch_size=2,
+    )
+    train_kwargs = mock_dl.call_args_list[0].kwargs
+    assert "sampler" in train_kwargs
+    assert isinstance(train_kwargs["sampler"], WeightedRandomSampler)
+
+
+@patch("torch.utils.data.DataLoader")
+@patch("src.data.loaders.CacheDataset")
+def test_build_loaders_val_uses_shuffle_false(mock_cache, mock_dl, tmp_path):
+    """Val DataLoader must be built with shuffle=False (deterministic evaluation order)."""
+    from src.data.loaders import build_loaders
+    mock_cache.return_value = MagicMock(__len__=lambda s: 2)
+    splits, config, feature_names, clin_mean, clin_std = _build_loaders_args(tmp_path)
+
+    build_loaders(
+        splits, config, feature_names, clin_mean, clin_std,
+        base_dir=tmp_path, cache_dir=tmp_path / "cache", batch_size=2,
+    )
+    val_kwargs = mock_dl.call_args_list[1].kwargs
+    assert val_kwargs.get("shuffle") is False
+
+
+@patch("torch.utils.data.DataLoader")
+@patch("src.data.loaders.CacheDataset")
+def test_build_loaders_batch_size_forwarded(mock_cache, mock_dl, tmp_path):
+    """The requested batch_size must be forwarded to both DataLoaders."""
+    from src.data.loaders import build_loaders
+    mock_cache.return_value = MagicMock(__len__=lambda s: 2)
+    splits, config, feature_names, clin_mean, clin_std = _build_loaders_args(tmp_path)
+
+    build_loaders(
+        splits, config, feature_names, clin_mean, clin_std,
+        base_dir=tmp_path, cache_dir=tmp_path / "cache", batch_size=4,
+    )
+    assert mock_dl.call_args_list[0].kwargs["batch_size"] == 4
+    assert mock_dl.call_args_list[1].kwargs["batch_size"] == 4

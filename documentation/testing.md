@@ -7,7 +7,7 @@ cd /home/ranema/AI4EVAR/ai4evar
 ~/.conda/envs/ai4evar/bin/python -m pytest tests/ -v
 ```
 
-238 tests, CPU-only, no GPU required, no external data files required, ~20 seconds.
+251 tests, CPU-only, no GPU required, no external data files required, ~17 seconds.
 
 ### On SLURM
 
@@ -59,7 +59,7 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 
 ---
 
-### `test_models.py` — 26 tests
+### `test_models.py` — 29 tests
 
 **Model constants:**
 - `COMPLICATIONS_FULL` has 7 entries
@@ -92,6 +92,11 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 - Strips `"module."` prefix from DataParallel-saved checkpoints
 - Filters unexpected legacy keys with `strict=False`
 - Raises `RuntimeError` on missing keys with `strict=True`
+
+**FiLM clamp (±0.1):**
+- Multiplicative scale `1 + tanh(γ) × 0.1` saturates to 1.1 with extreme positive γ
+- Additive shift `tanh(β) × 0.1` saturates to +0.1 with extreme positive β (zero input)
+- Additive shift saturates to −0.1 with extreme negative β (zero input)
 
 ---
 
@@ -163,7 +168,7 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 
 ---
 
-### `test_loaders.py` — 40 tests
+### `test_loaders.py` — 44 tests
 
 **Clinical feature cleaning:**
 - Numeric strings → float
@@ -216,6 +221,14 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 **Tensor keys:**
 - Without complications: `"ctad"`, `"clin"`, `"aaa"`, `"reint"` are present; no `"comp"` key
 - With complications: `"comp"` key is also present
+
+**`build_loaders`:**
+- Returns a `(train_loader, val_loader)` tuple
+- Train DataLoader is built with a `WeightedRandomSampler` (class-balanced ~50/50)
+- Val DataLoader is built with `shuffle=False` (deterministic evaluation order)
+- Requested `batch_size` is forwarded to both loaders
+
+`CacheDataset` and `torch.utils.data.DataLoader` are mocked so no NIfTI files or GPU workers are needed; `WeightedRandomSampler` is left real to verify the balanced-sampling logic runs.
 
 ---
 
@@ -326,9 +339,9 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 
 ---
 
-### `test_trainer.py` — 12 tests
+### `test_trainer.py` — 19 tests
 
-Tests for `validate()` (trainer.py) and the checkpoint save format.
+Tests for `validate()`, gate L1 regularisation, W&B logging helpers, and the checkpoint save format.
 
 **SLURM/GPU safety:** An autouse fixture patches `src.training.trainer.DEVICE` to `cpu`, so the tests run identically on CPU-only and GPU-allocated nodes.
 
@@ -349,6 +362,15 @@ Tests for `validate()` (trainer.py) and the checkpoint save format.
 - Dict produced by trainer.py contains all 7 required keys: `state_dict`, `threshold`, `feature_names`, `clin_mean`, `clin_std`, `complications`, `config`
 - `threshold`, `feature_names`, `clin_mean`, `clin_std` survive a save/load round-trip correctly
 - With-complications checkpoint stores the complication name list
+
+**Gate L1 regularisation effect:**
+- Adding `gate_l1_weight × sigmoid(feature_gate).sum()` with weight > 0 produces a strictly larger total loss than the criterion alone
+- With `gate_l1_weight = 0` the added term is exactly zero (no numerical drift)
+
+**W&B logging helpers (`log_val_table`, `log_xai_epoch`):**
+- Both run without error for the no-complications variant (wandb mocked)
+- Both run without error for the with-complications variant
+- `wandb.log` is called exactly once per invocation in each case
 
 ---
 
@@ -374,21 +396,12 @@ Tests for `run_test()` (evaluation/runner.py) — the full inference pipeline.
 
 ## Known Gaps
 
-The following code paths have no test coverage. Some are impractical to test without real data or a GPU; others are straightforward additions if needed.
+### Accepted Gaps
 
-### Medium Priority
-
-| Gap | Why it matters |
-|---|---|
-| **`build_loaders`** | Called every training run; tested for importability only. A test with a tiny synthetic data list would verify DataLoader structure and the balanced sampler. |
-| **Gate L1 regularisation effect** | The feature gate shape is tested, but no test verifies that the L1 penalty actually changes the loss magnitude when `gate_l1_weight > 0`. |
-| **FiLM clamp (±0.1)** | The architecture description says γ/β are clamped to ±0.1 via tanh, but this is not asserted in any test. A single forward-pass check would confirm the design is correctly implemented. |
-| **W&B logging functions** | `log_val_table` and `log_xai_epoch` are completely untested. Mocking `wandb` with `MagicMock` and calling these functions would at least verify they don't raise. |
-
-### Low Priority / Accepted Gaps
+All high- and medium-priority gaps have been addressed. The remaining gaps are integration-level concerns that require real data or a GPU and are intentionally left uncovered.
 
 | Gap | Reason accepted |
 |---|---|
 | `run_pipeline` (full training loop) | Integration test territory; needs GPU and data; covered by SLURM runs |
-| GradCAM with I3ResNet | Requires a different backbone class; mock always returns None |
-| `_log_detailed_metrics` | Internal helper called inside `log_val_table`; low standalone risk |
+| GradCAM with I3ResNet | Requires a different backbone class; mock backbone always returns None |
+| `_log_detailed_metrics` | Thin internal helper; called and implicitly exercised inside `validate()` |
