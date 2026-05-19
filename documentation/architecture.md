@@ -9,12 +9,12 @@ CTA volume (4-ch, 128³)
     → cta_adapter (Conv3d 4→1)
     → Merlin 3D ViT + LoRA adapters
     → visual_proj (Linear 2048→256)           → 256-dim visual embedding ─────┐
-                                                                               │
-Clinical tabular (~744 features, z-normalised)                                 │
-    → feature_gate (per-feature sigmoid)                                       │
+                                                                              │
+Clinical tabular (~744 features, z-normalised)                                │
+    → feature_gate (per-feature sigmoid)                                      │
     → clinical_branch (MLP → 32-dim)          → 32-dim clinical embedding ────┤
-                                                                               │
-AAA geometry (5 scalars)                                                       │
+                                                                              │
+AAA geometry (5 scalars)                                                      │
     → aaa_metrics_branch (MLP → 32-dim)       → 32-dim AAA embedding ─────────┘
                                                         │
                                           cat → 320-dim fused representation
