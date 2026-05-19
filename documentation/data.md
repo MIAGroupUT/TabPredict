@@ -8,7 +8,7 @@ All processed data lives under:
 /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1/
 ├── imagesTr/           # CTA volumes (.nii.gz), one file per patient
 ├── labelsTr/           # nnUNet segmentation masks (.nii.gz)
-│                       #   label 1 = aortic lumen, label 2 = intraluminal thrombus (ILT)
+│                       # label 1 = aortic lumen, label 2 = intraluminal thrombus (ILT)
 ├── distMapsTr/         # Distance maps from lumen surface (.nii.gz)
 ├── cfdTr/              # CFD hemodynamics (.vtp meshes, optional)
 ├── metricsTr/          # AAA geometry metrics (.json, one file per patient)
