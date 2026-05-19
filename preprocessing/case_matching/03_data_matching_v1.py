@@ -242,6 +242,9 @@ def build_multimodal_dataset(sav_path, image_dir, cfd_dir, output_json):
     stats = {k: 0 for k in list(comp_patterns.keys()) + ["total", "reint", "death", "death_surg", "death_hosp",\
              "sac_measured", "sac_regression", "sac_stable", "sac_expansion"]}
     matched_df_list = []
+    site_stats = {}          # site_abbr → per-label counts
+    no_baseline_patients = []  # (unique_key, site_abbr) where bl_val is None
+    no_fu_patients = []        # (unique_key, site_abbr) where bl exists but fu_val is None
 
     # Pre-op / Post-op feature split
     pre_op_cols = [
@@ -389,6 +392,28 @@ def build_multimodal_dataset(sav_path, image_dir, cfd_dir, output_json):
             stats["sac_expansion"]  += sac_expansion    # diff ≥ +5
             unique_key = f"{spss_id}_{site_abbr}"
 
+            # ---- Per-site stats & data-quality tracking ----
+            if site_abbr not in site_stats:
+                site_stats[site_abbr] = {k: 0 for k in list(comp_patterns.keys()) + [
+                    "total", "reint", "death", "death_surg", "death_hosp",
+                    "sac_measured", "sac_regression", "sac_stable", "sac_expansion"
+                ]}
+            if bl_val is None:
+                no_baseline_patients.append((unique_key, site_abbr))
+            elif fu_val is None:
+                no_fu_patients.append((unique_key, site_abbr))
+            site_stats[site_abbr]["total"] += 1
+            site_stats[site_abbr]["reint"] += has_reint
+            site_stats[site_abbr]["death"] += has_death
+            site_stats[site_abbr]["death_surg"] += has_death_surg
+            site_stats[site_abbr]["death_hosp"] += has_death_hosp
+            site_stats[site_abbr]["sac_measured"] += int(diam_diff is not None)
+            site_stats[site_abbr]["sac_regression"] += sac_regression
+            site_stats[site_abbr]["sac_stable"] += sac_stable
+            site_stats[site_abbr]["sac_expansion"] += sac_expansion
+            for _label, _val in gt_comps.items():
+                site_stats[site_abbr][_label] += _val
+
             # ---- Final structured record ----
             final_data[unique_key] = {
                 "metadata": {
@@ -438,32 +463,123 @@ def build_multimodal_dataset(sav_path, image_dir, cfd_dir, output_json):
     if matched_df_list:
         m_df = pd.concat(matched_df_list)
 
-        print("\n" + "=" * 95)
-        print("FINAL MULTI-MODAL DATASET ANALYSIS")
-        print("=" * 95)
-        print(f"Matched Patients: {len(final_data)}")
+        report_lines = []
+        def rprint(s=""):
+            """Print to console and append to report file."""
+            print(s)
+            report_lines.append(str(s))
+        def fprint(s=""):
+            """Append to report file only (not printed to console)."""
+            report_lines.append(str(s))
+
+        rprint("\n" + "=" * 95)
+        rprint("FINAL MULTI-MODAL DATASET ANALYSIS")
+        rprint("=" * 95)
+        rprint(f"Matched Patients: {len(final_data)}")
 
         pre_sparsity = m_df[pre_op_cols].isna().mean()
-        print("\nTOP 10 MOST COMPLETE PRE-OP FEATURES:")
+        rprint("\nTOP 10 MOST COMPLETE PRE-OP FEATURES:")
         pre_top = (1 - pre_sparsity).sort_values(ascending=False).head(10)
-
         for field, score in pre_top.items():
-            label = str(meta.column_names_to_labels.get(field, "No Label"))[:45]
-            print(f" - {field:25} | {score:>4.0%} filled | {label}")
+            field_label = str(meta.column_names_to_labels.get(field, "No Label"))[:45]
+            rprint(f" - {field:25} | {score:>4.0%} filled | {field_label}")
 
-        print("\nGROUND TRUTH SUMMARY")
-        print("-" * 95)
+        # --- Unified ground-truth + data-quality table ---
         sac_keys = {"sac_regression", "sac_stable", "sac_expansion"}
-        sac_n = stats["sac_measured"] or 1
-        for k, v in stats.items():
-            if k in ("total", "sac_measured"):
-                continue
-            denom = sac_n if k in sac_keys else stats["total"]
-            label = f" (of {stats['sac_measured']} with measurement)" if k in sac_keys else ""
-            print(f"{k:40} | {v:<10} | {(v/denom)*100:.1f}%{label}")
+        sites = sorted(site_stats.keys())
+        total_n = stats["total"] or 1
 
-        print(f"{'sac_measured':40} | {stats['sac_measured']:<10} | {(stats['sac_measured']/stats['total'])*100:.1f}% of total")
-        print("=" * 95)
+        MW = 38   # metric column width
+        CW = 16   # data column width
+
+        def fmt_cell(count, denom, note=""):
+            if denom == 0:
+                cell = f"{count:<5} (   -  ){note}"
+            else:
+                pct = (count / denom) * 100
+                cell = f"{count:<5} ({pct:5.1f}%){note}"
+            return cell.ljust(CW)
+
+        n_total = stats['total']
+        total_hdr = f"Total (N={n_total})"
+        header = f"{'Metric':{MW}} | {total_hdr:{CW}}"
+        for site in sites:
+            n_site = site_stats[site]['total']
+            site_hdr = f"{site} (N={n_site})"
+            header += f" | {site_hdr:{CW}}"
+
+        sep_len = MW + 3 + CW + len(sites) * (3 + CW)
+        sep = "-" * sep_len
+
+        rprint("\nGROUND TRUTH SUMMARY")
+        rprint(sep)
+        rprint(header)
+        rprint(sep)
+
+        ordered_metrics = (
+            list(comp_patterns.keys()) +
+            ["reint", "death", "death_surg", "death_hosp",
+             "sac_measured", "sac_regression", "sac_stable", "sac_expansion"]
+        )
+
+        for metric in ordered_metrics:
+            is_sac_ratio = metric in sac_keys
+            note = "*" if is_sac_ratio else ""
+            total_count = stats[metric]
+            total_denom = (stats["sac_measured"] or 1) if is_sac_ratio else total_n
+            row = f"{metric:{MW}} | {fmt_cell(total_count, total_denom, note)}"
+            for site in sites:
+                s = site_stats[site]
+                site_count = s.get(metric, 0)
+                site_denom = (s["sac_measured"] or 1) if is_sac_ratio else (s["total"] or 1)
+                row += f" | {fmt_cell(site_count, site_denom, note)}"
+            rprint(row)
+
+        # Data-quality count rows (no patient IDs here)
+        rprint(sep)
+        no_bl_by_site = {}
+        for pid, site in no_baseline_patients:
+            no_bl_by_site.setdefault(site, []).append(pid)
+        no_fu_by_site = {}
+        for pid, site in no_fu_patients:
+            no_fu_by_site.setdefault(site, []).append(pid)
+
+        for dq_label, by_site_dict, dq_total in [
+            ("no_baseline_diam", no_bl_by_site, len(no_baseline_patients)),
+            ("no_fu_diam (bl present)", no_fu_by_site, len(no_fu_patients)),
+        ]:
+            row = f"{dq_label:{MW}} | {fmt_cell(dq_total, total_n)}"
+            for site in sites:
+                site_count = len(by_site_dict.get(site, []))
+                site_n = site_stats[site]["total"] or 1
+                row += f" | {fmt_cell(site_count, site_n)}"
+            rprint(row)
+
+        rprint(sep)
+        rprint("* sac_regression / sac_stable / sac_expansion are % of sac_measured, not total")
+        rprint("=" * sep_len)
+
+        # --- Data-quality patient-ID detail: .txt file only ---
+        fprint("\n" + "=" * sep_len)
+        fprint("DATA QUALITY DETAIL — PATIENT IDs")
+        fprint("=" * sep_len)
+        fprint(f"\nMissing Baseline Diameter — {len(no_baseline_patients)} patients total")
+        for site, pids in sorted(no_bl_by_site.items()):
+            fprint(f"  {site} ({len(pids)}): {', '.join(pids)}")
+        if not no_baseline_patients:
+            fprint("  (none)")
+        fprint(f"\nMissing Follow-up Diameter (baseline present, no FU) — {len(no_fu_patients)} patients total")
+        for site, pids in sorted(no_fu_by_site.items()):
+            fprint(f"  {site} ({len(pids)}): {', '.join(pids)}")
+        if not no_fu_patients:
+            fprint("  (none)")
+        fprint("=" * sep_len)
+
+        # --- Save report ---
+        analysis_txt = output_json.rsplit('.json', 1)[0] + '_analysis.txt'
+        with open(analysis_txt, 'w') as f:
+            f.write('\n'.join(report_lines) + '\n')
+        print(f"\nAnalysis report saved to: {analysis_txt}")
 
 # =====================================================
 # EXECUTION

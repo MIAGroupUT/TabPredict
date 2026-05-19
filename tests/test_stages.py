@@ -98,6 +98,29 @@ def test_causal_dropout_aaa_only_zero_when_cta_zero():
             # but no violation possible since the causal direction is CTA→AAA
 
 
+def test_causal_dropout_clinical_at_p1():
+    """With p_clinical=1 all clinical samples should be zeroed."""
+    from src.training.stages import causal_modality_dropout
+    cta, clin, aaa = _make_inputs()
+    _, clin_d, _ = causal_modality_dropout(
+        cta, clin, aaa, p_cta=0.0, p_aaa_given_cta=0.0, p_aaa_given_clin=0.0,
+        p_clinical=1.0,
+    )
+    assert clin_d.abs().sum().item() == 0.0
+
+
+def test_causal_dropout_clinical_preserves_cta():
+    """Zeroing clinical must not affect CTA or AAA."""
+    from src.training.stages import causal_modality_dropout
+    cta, clin, aaa = _make_inputs()
+    cta_d, _, aaa_d = causal_modality_dropout(
+        cta, clin, aaa, p_cta=0.0, p_aaa_given_cta=0.0, p_aaa_given_clin=0.0,
+        p_clinical=1.0,
+    )
+    assert torch.allclose(cta_d, cta)
+    assert torch.allclose(aaa_d, aaa)
+
+
 def test_maybe_apply_modality_dropout_no_op_at_test_time():
     """is_training=False must return tensors unchanged (same object)."""
     from src.training.stages import maybe_apply_modality_dropout
@@ -128,6 +151,20 @@ def test_set_stage_a_freezes_visual_branch(fresh_model_no_comp):
     from src.training.stages import set_stage_a
     set_stage_a(fresh_model_no_comp)
     for p in fresh_model_no_comp.visual_branch.parameters():
+        assert not p.requires_grad
+
+
+def test_set_stage_a_freezes_cta_adapter(fresh_model_no_comp):
+    from src.training.stages import set_stage_a
+    set_stage_a(fresh_model_no_comp)
+    for p in fresh_model_no_comp.cta_adapter.parameters():
+        assert not p.requires_grad
+
+
+def test_set_stage_a_freezes_visual_proj(fresh_model_no_comp):
+    from src.training.stages import set_stage_a
+    set_stage_a(fresh_model_no_comp)
+    for p in fresh_model_no_comp.visual_proj.parameters():
         assert not p.requires_grad
 
 
@@ -187,6 +224,20 @@ def test_set_stage_b_trains_clinical_branch(fresh_model_no_comp):
         assert p.requires_grad
 
 
+def test_set_stage_b_trains_cta_adapter(fresh_model_no_comp):
+    from src.training.stages import set_stage_b
+    set_stage_b(fresh_model_no_comp)
+    for p in fresh_model_no_comp.cta_adapter.parameters():
+        assert p.requires_grad
+
+
+def test_set_stage_b_trains_visual_proj(fresh_model_no_comp):
+    from src.training.stages import set_stage_b
+    set_stage_b(fresh_model_no_comp)
+    for p in fresh_model_no_comp.visual_proj.parameters():
+        assert p.requires_grad
+
+
 # ── build_optimizer ───────────────────────────────────────────────────────────
 
 
@@ -200,19 +251,19 @@ def test_build_optimizer_returns_adamw(fresh_model_no_comp):
 def test_build_optimizer_stage_a_group_count(fresh_model_no_comp):
     from src.training.stages import build_optimizer
     opt = build_optimizer(fresh_model_no_comp, "A")
-    assert len(opt.param_groups) == 8  # no complications_head
+    assert len(opt.param_groups) == 6  # tabular + fusion only; no cta_adapter/visual_proj
 
 
 def test_build_optimizer_stage_a_with_comp_group_count(fresh_model_with_comp):
     from src.training.stages import build_optimizer
     opt = build_optimizer(fresh_model_with_comp, "A")
-    assert len(opt.param_groups) == 9  # includes complications_head
+    assert len(opt.param_groups) == 7  # includes complications_head
 
 
 def test_build_optimizer_stage_b_group_count(fresh_model_no_comp):
     from src.training.stages import build_optimizer
     opt = build_optimizer(fresh_model_no_comp, "B")
-    assert len(opt.param_groups) == 9  # includes LoRA group
+    assert len(opt.param_groups) == 9  # tabular + cta_adapter + visual_proj + lora + head
 
 
 def test_build_optimizer_stage_b_lora_lr(fresh_model_no_comp):

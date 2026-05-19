@@ -93,7 +93,7 @@ def test_forward_no_comp_shapes(model_no_comp, cta, clin, aaa):
 
 def test_forward_no_comp_logvar_clamped(model_no_comp, cta, clin, aaa):
     _, logvar = model_no_comp(cta, clin, aaa)
-    assert logvar.min().item() >= -2.0 - 1e-5
+    assert logvar.min().item() >= -4.0 - 1e-5
     assert logvar.max().item() <=  2.0 + 1e-5
 
 
@@ -121,9 +121,9 @@ def test_forward_with_comp_shapes(model_with_comp, cta, clin, aaa):
 
 def test_forward_with_comp_logvar_clamped(model_with_comp, cta, clin, aaa):
     _, logvar, _, comp_logvar = model_with_comp(cta, clin, aaa)
-    assert logvar.min().item()      >= -2.0 - 1e-5
+    assert logvar.min().item()      >= -4.0 - 1e-5
     assert logvar.max().item()      <=  2.0 + 1e-5
-    assert comp_logvar.min().item() >= -2.0 - 1e-5
+    assert comp_logvar.min().item() >= -4.0 - 1e-5
     assert comp_logvar.max().item() <=  2.0 + 1e-5
 
 

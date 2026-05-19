@@ -42,6 +42,7 @@ from src.training.stages import (
     set_stage_a,
     set_stage_b,
 )
+from src.xai.explainer import ReinterventionXAI
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -55,6 +56,7 @@ def validate(
     complications: list[str],
     size: tuple[int, int, int] = (128, 128, 128),
     batch_size: int = 8,
+    recall_beta: float = 1.0,
 ) -> tuple[float, dict]:
     """Evaluate on val split; return (avg_loss, metrics_dict)."""
     model.eval()
@@ -93,10 +95,11 @@ def validate(
     reint_g  = torch.cat(all_reint_gt).numpy().flatten().astype(int)
     reint_lv = torch.cat(all_reint_lv).numpy().flatten()
 
-    # Optimal F1 threshold via PR curve
+    # Optimal F-beta threshold via PR curve (beta>1 weights recall over precision)
     p_c, r_c, t_c = precision_recall_curve(reint_g, reint_p)
-    f1s          = 2 * p_c[:-1] * r_c[:-1] / (p_c[:-1] + r_c[:-1] + 1e-8)
-    best_idx     = int(np.argmax(f1s))
+    b2           = recall_beta ** 2
+    f_beta       = (1 + b2) * p_c[:-1] * r_c[:-1] / (b2 * p_c[:-1] + r_c[:-1] + 1e-8)
+    best_idx     = int(np.argmax(f_beta))
     best_thresh  = float(t_c[best_idx])
     reint_pred   = (reint_p > best_thresh).astype(int)
 
@@ -109,8 +112,9 @@ def validate(
         "val/reint_precision":   float(precision_score(reint_g, reint_pred, zero_division=0)),
         "val/reint_recall":      float(recall_score(reint_g, reint_pred, zero_division=0)),
         "val/reint_accuracy":    float(accuracy_score(reint_g, reint_pred)),
-        "val/reint_best_f1":     float(f1s[best_idx]),
+        "val/reint_best_fbeta":  float(f_beta[best_idx]),
         "val/reint_best_thresh": best_thresh,
+        "val/recall_beta":       recall_beta,
         "val/mean_uncertainty":  float(reint_lv.mean()),
         "val/reint_TP": int(tp), "val/reint_FP": int(fp),
         "val/reint_TN": int(tn), "val/reint_FN": int(fn),
@@ -200,6 +204,70 @@ def log_val_table(
     print(f"Logged val table: {case_counter} cases.")
 
 
+def log_xai_epoch(
+    model: nn.Module,
+    val_loader: torch.utils.data.DataLoader,
+    epoch: int,
+    stage: str,
+    feature_names: list[str],
+    complications: list[str],
+    n_samples: int = 4,
+    use_gradcam: bool = False,
+    size: tuple[int, int, int] = (128, 128, 128),
+    batch_size: int = 8,
+) -> None:
+    """Run XAI on up to n_samples val patients and log a W&B table + optional GradCAM."""
+    xai = ReinterventionXAI(get_model(model), feature_names, complications)
+    with_comp = bool(complications)
+
+    columns = [
+        "epoch", "stage", "case_idx",
+        "reint_prob", "confidence_level", "primary_risk_factor", "causal_chain",
+        "imp_CTA", "imp_Clinical", "imp_AAA",
+    ]
+    if with_comp:
+        columns += [f"comp_{c}" for c in complications]
+
+    table = wandb.Table(columns=columns)
+    wandb_images: dict = {}
+
+    model.eval()
+    count = 0
+    for batch in val_loader:
+        if count >= n_samples:
+            break
+        cta  = batch.get("cta", torch.zeros(batch_size, 4, *size)).to(DEVICE).float()
+        clin = batch["clin"].to(DEVICE).float()
+        aaa  = batch["aaa_metrics"].to(DEVICE).float()
+
+        for i in range(cta.shape[0]):
+            if count >= n_samples:
+                break
+            c_cta, c_clin, c_aaa = cta[i:i+1], clin[i:i+1], aaa[i:i+1]
+            xr = xai.full_explain(c_cta, c_clin, c_aaa)
+            mod = xr.get("modality_importance", {})
+
+            row = [
+                epoch, stage, count,
+                xr["reintervention_prob"], xr["confidence_level"],
+                xr["primary_risk_factor"], xr["causal_chain"],
+                mod.get("CTA", 0.0), mod.get("Clinical", 0.0), mod.get("AAA_metrics", 0.0),
+            ]
+            if with_comp:
+                row += [xr.get("complication_probs", {}).get(c, 0.0) for c in complications]
+            table.add_data(*row)
+
+            if use_gradcam:
+                cam_np = xai.gradcam(c_cta, c_clin, c_aaa)
+                if cam_np is not None:
+                    for k, v in xai.get_gradcam_wandb_images(c_cta, cam_np).items():
+                        wandb_images[f"xai/{k}_s{count}"] = v
+            count += 1
+
+    wandb.log({f"xai/table_stage_{stage}": table, "epoch": epoch, **wandb_images})
+    print(f"Logged XAI table: {count} samples (epoch {epoch}, stage {stage}).")
+
+
 def _log_detailed_metrics(
     stage: str,
     epoch: int,
@@ -229,7 +297,8 @@ def run_pipeline(cfg: dict) -> None:
     cfg keys (see experiments/*.yaml for the canonical schema):
         name, model, training, paths, wandb
     """
-    set_all_seeds(cfg["training"].get("seed", 3299))
+    seed = cfg["training"].get("seed", 3299)
+    set_all_seeds(seed)
 
     base_dir      = Path(cfg["paths"]["base_dir"])
     cache_dir     = Path(cfg["paths"]["cache_dir"])
@@ -256,13 +325,14 @@ def run_pipeline(cfg: dict) -> None:
         complications=complications,
         train_cache_rate=cfg["training"].get("train_cache_rate", 0.5),
         val_cache_rate=cfg["training"].get("val_cache_rate", 1.0),
-        size=size, spacing=spacing,
+        size=size, spacing=spacing, seed=seed,
     )
 
     # ── W&B ──────────────────────────────────────────────────────────────────
     wandb.init(
         project=cfg["wandb"]["project"],
         name=cfg["wandb"].get("run_name", cfg["name"]),
+        mode=cfg["wandb"].get("mode", "online"),
         config={
             "clinical_dim":      len(feature_names),
             "num_complications": len(complications),
@@ -284,20 +354,29 @@ def run_pipeline(cfg: dict) -> None:
         model = nn.DataParallel(model)
 
     # ── loss ──────────────────────────────────────────────────────────────────
+    _focal_gamma = cfg["training"].get("focal_gamma", 2.0)
+    _label_smooth = cfg["training"].get("label_smoothing", 0.02)
+    _pos_weight   = cfg["training"].get("pos_weight", 1.0)
     if with_comp:
         criterion = MultiTaskReinterventionLoss(
-            focal_gamma=cfg["training"].get("focal_gamma", 2.0),
-            label_smoothing=cfg["training"].get("label_smoothing", 0.05),
+            focal_gamma=_focal_gamma,
+            label_smoothing=_label_smooth,
+            pos_weight_reint=_pos_weight,
             device=DEVICE,
         )
     else:
         criterion = ReinterventionLoss(
-            focal_gamma=cfg["training"].get("focal_gamma", 2.0),
-            label_smoothing=cfg["training"].get("label_smoothing", 0.05),
+            focal_gamma=_focal_gamma,
+            label_smoothing=_label_smooth,
+            pos_weight=_pos_weight,
             device=DEVICE,
         )
 
-    dropout_cfg = cfg["training"].get("modality_dropout", {})
+    dropout_cfg  = cfg["training"].get("modality_dropout", {})
+    xai_every    = cfg["training"].get("xai_every_n_epochs", 10)
+    xai_samples  = cfg["training"].get("xai_samples", 4)
+    xai_gradcam  = cfg["training"].get("xai_gradcam", False)
+    recall_beta  = cfg["training"].get("recall_beta", 1.0)
 
     # ── stage loop ────────────────────────────────────────────────────────────
     for stage_cfg in cfg["training"]["stages"]:
@@ -347,6 +426,7 @@ def run_pipeline(cfg: dict) -> None:
                         p_cta=dropout_cfg.get("p_cta", 0.1),
                         p_aaa_given_cta=dropout_cfg.get("p_aaa_given_cta", 0.15),
                         p_aaa_given_clin=dropout_cfg.get("p_aaa_given_clin", 0.15),
+                        p_clinical=dropout_cfg.get("p_clinical", 0.0),
                     )
 
                 reint_gt = batch["reintervention_label"].to(DEVICE).float()
@@ -378,7 +458,8 @@ def run_pipeline(cfg: dict) -> None:
                 pbar.set_postfix(loss=f"{loss.item():.3f}", avg=f"{train_loss/(i+1):.3f}")
 
             val_loss, val_metrics = validate(
-                model, val_loader, criterion, complications, size, batch_size
+                model, val_loader, criterion, complications, size, batch_size,
+                recall_beta=recall_beta,
             )
             _log_detailed_metrics(st, epoch, train_loss / len(train_loader),
                                    val_loss, last_loss_dict, opt)
@@ -394,6 +475,15 @@ def run_pipeline(cfg: dict) -> None:
                     model, val_loader, epoch, st,
                     val_metrics.get("val/reint_best_thresh", 0.5),
                     complications, size, batch_size,
+                )
+
+            if (epoch + 1) % xai_every == 0:
+                log_xai_epoch(
+                    model, val_loader, epoch, st,
+                    feature_names, complications,
+                    n_samples=xai_samples,
+                    use_gradcam=xai_gradcam,
+                    size=size, batch_size=batch_size,
                 )
 
             val_auc = val_metrics.get("val/reint_auc", 0.5)

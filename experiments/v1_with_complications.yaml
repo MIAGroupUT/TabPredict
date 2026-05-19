@@ -38,9 +38,10 @@ training:
 
   # Loss hyperparameters
   focal_gamma: 2.0
-  label_smoothing: 0.05
-  pos_weight_reint: 1.0
-  gate_l1_weight: 0.001
+  label_smoothing: 0.02      # Reduced: small dataset benefits from sharper targets
+  pos_weight: 3.0            # Extra penalty on FN on top of 50/50 balanced sampler
+  gate_l1_weight: 0.0001     # Reduced: allow more clinical features through the gate
+  recall_beta: 2.0           # F-beta threshold selection; beta>1 weights recall over precision
 
   # comp_weight is set per-stage; low in A (sparse labels + frozen backbone),
   # higher in B once LoRA visual features are available
@@ -52,16 +53,22 @@ training:
     p_cta: 0.10
     p_aaa_given_cta: 0.15
     p_aaa_given_clin: 0.15
+    p_clinical: 0.20        # Force visual branch by randomly hiding clinical features
+
+  # XAI logging during training
+  xai_every_n_epochs: 3     # run full_explain on val samples every N epochs
+  xai_samples: 4            # number of val patients to explain per run
+  xai_gradcam: true         # true to also compute GradCAM (slower; needs I3ResNet)
 
   stages:
     - name: A
-      epochs: 40
-      patience: 8
+      epochs: 60
+      patience: 12
       T_0: 20
 
     - name: B
-      epochs: 120
-      patience: 12
+      epochs: 150
+      patience: 20
       T_0: 30
 
 paths:
@@ -72,3 +79,4 @@ paths:
 wandb:
   project: AAA-Reintervention-Risk
   run_name: v1_with_complications
+  mode: online    # set to "offline" or "disabled" to skip W&B cloud sync

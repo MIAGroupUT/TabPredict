@@ -80,7 +80,7 @@ def test_heteroscedastic_high_uncertainty_allowed():
     """Very high logvar (uncertainty) should be penalised by the L2 term but not NaN."""
     from src.training.losses import _heteroscedastic
     logit  = torch.zeros(4, 1)
-    logvar = torch.full((4, 1), 10.0)   # extreme, gets clamped to 2.0
+    logvar = torch.full((4, 1), 10.0)   # extreme, gets clamped to 2.0 (upper bound unchanged)
     gt     = torch.ones(4, 1)
     loss   = _heteroscedastic(logit, logvar, gt)
     assert torch.isfinite(loss)

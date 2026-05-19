@@ -146,9 +146,9 @@ class ReinterventionRiskModel(nn.Module):
 
         self.clinical_branch = nn.Sequential(
             nn.Linear(clinical_dim, 128), nn.LayerNorm(128), nn.ReLU(),
-            nn.Dropout(0.4),
-            nn.Linear(128, 32),
             nn.Dropout(0.2),
+            nn.Linear(128, 32),
+            nn.Dropout(0.1),
         )
         self.aaa_metrics_branch = nn.Sequential(
             nn.Linear(aaa_dim, 32), nn.ReLU(),
@@ -166,13 +166,13 @@ class ReinterventionRiskModel(nn.Module):
         # ── output heads ─────────────────────────────────────────────────
         self.reintervention_head = nn.Sequential(
             nn.Linear(self._fusion_dim, 256), nn.ReLU(),
-            nn.Dropout(0.5),
+            nn.Dropout(0.2),
             nn.Linear(256, 2),  # logit + logvar
         )
         if self.complications:
             self.complications_head = nn.Sequential(
                 nn.Linear(self._fusion_dim, 256), nn.ReLU(),
-                nn.Dropout(0.4),
+                nn.Dropout(0.2),
                 nn.Linear(256, num_comp * 2),  # (logit + logvar) per complication
             )
 
@@ -218,7 +218,7 @@ class ReinterventionRiskModel(nn.Module):
 
         reint_out    = self.reintervention_head(fused)
         reint_logit  = reint_out[:, 0:1]
-        reint_logvar = torch.clamp(reint_out[:, 1:2], -2, 2)
+        reint_logvar = torch.clamp(reint_out[:, 1:2], -4, 2)
 
         if not self.complications:
             return reint_logit, reint_logvar
@@ -226,5 +226,5 @@ class ReinterventionRiskModel(nn.Module):
         comp_out    = self.complications_head(fused)
         comp_out    = comp_out.view(comp_out.size(0), len(self.complications), 2)
         comp_logits = comp_out[:, :, 0]
-        comp_logvar = torch.clamp(comp_out[:, :, 1], -2, 2)
+        comp_logvar = torch.clamp(comp_out[:, :, 1], -4, 2)
         return reint_logit, reint_logvar, comp_logits, comp_logvar

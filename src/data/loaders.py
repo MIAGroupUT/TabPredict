@@ -14,7 +14,7 @@ compute_clin_stats()        Compute per-feature mean/std from training split.
 
 from __future__ import annotations
 
-import json
+import json, random
 from pathlib import Path
 from typing import Any
 
@@ -295,6 +295,7 @@ def build_loaders(
     val_cache_rate: float = 1.0,
     size: tuple[int, int, int] = DEFAULT_SIZE,
     spacing: tuple[float, float, float] = DEFAULT_SPACING,
+    seed: int = 3299,
 ) -> tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
     """
     Build train and val DataLoaders with class-balanced sampling on
@@ -324,12 +325,24 @@ def build_loaders(
     train_labels   = [int(item["reintervention_label"][0]) for item in train_files]
     class_counts   = np.bincount(train_labels)
     sample_weights = [1.0 / class_counts[l] for l in train_labels]
+    sampler_generator = torch.Generator()
+    sampler_generator.manual_seed(seed)
     sampler = WeightedRandomSampler(
-        torch.DoubleTensor(sample_weights), len(sample_weights), replacement=True
+        torch.DoubleTensor(sample_weights), len(sample_weights),
+        replacement=True, generator=sampler_generator,
     )
 
+    # Each DataLoader worker gets a deterministic seed derived from the base seed
+    # so that per-worker augmentation (noise, intensity scale) is reproducible.
+    def _worker_init(worker_id: int) -> None:
+        worker_seed = seed + worker_id
+        random.seed(worker_seed)
+        np.random.seed(worker_seed)
+        torch.manual_seed(worker_seed)
+
     loader_kwargs = dict(num_workers=num_workers, pin_memory=True,
-                         persistent_workers=True, prefetch_factor=4)
+                         persistent_workers=True, prefetch_factor=4,
+                         worker_init_fn=_worker_init)
     train_loader = DataLoader(train_ds, batch_size=batch_size, sampler=sampler, **loader_kwargs)
     val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False,  **loader_kwargs)
     return train_loader, val_loader

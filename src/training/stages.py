@@ -29,7 +29,9 @@ def set_all_seeds(seed: int) -> None:
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)          # covers multi-GPU (DataParallel)
     torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False    # prevents cuDNN auto-tuner non-determinism
 
 
 # ── modality dropout (causal augmentation) ───────────────────────────────────
@@ -41,18 +43,24 @@ def causal_modality_dropout(
     p_cta: float = 0.1,
     p_aaa_given_cta: float = 0.2,
     p_aaa_given_clin: float = 0.2,
+    p_clinical: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Simulate realistic missingness patterns.
     - CTA goes missing independently with p_cta.
     - AAA metrics (derived from CTA) go missing when CTA is missing OR with
       additional probability reflecting poor-quality segmentation.
+    - Clinical features go missing with p_clinical (non-causal; used as
+      regularisation so the visual branch is forced to develop independent
+      representations rather than always relying on tabular shortcuts).
     """
     bsz = cta.size(0)
     cta_d, clin_d, aaa_d = cta.clone(), clin.clone(), aaa.clone()
     cta_present = torch.rand(bsz, device=cta.device) > p_cta
 
     for b in range(bsz):
+        if p_clinical > 0 and random.random() < p_clinical:
+            clin_d[b] = 0
         if not cta_present[b]:
             cta_d[b] = 0
             continue  # AAA may still be derivable from clinical
@@ -70,28 +78,27 @@ def maybe_apply_modality_dropout(
     p_cta: float,
     p_aaa_given_cta: float,
     p_aaa_given_clin: float,
+    p_clinical: float = 0.0,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     if not is_training:
         return cta, clin, aaa
-    return causal_modality_dropout(cta, clin, aaa, p_cta, p_aaa_given_cta, p_aaa_given_clin)
+    return causal_modality_dropout(
+        cta, clin, aaa, p_cta, p_aaa_given_cta, p_aaa_given_clin, p_clinical
+    )
 
 
 # ── stage setup ───────────────────────────────────────────────────────────────
 
 def set_stage_a(model: nn.Module) -> None:
     """
-    Freeze Merlin/LoRA backbone entirely.  Train everything else:
-    cta_adapter, visual_proj, feature_gate, clinical/AAA branches,
-    condition_net, fusion_norm, reintervention_head, complications_head
-    (if present).
+    Freeze the entire CTA visual pathway (Merlin, LoRA, cta_adapter, visual_proj).
+    Train only tabular branches, fusion, and prediction heads.
+    Goal: clean clinical/AAA warm-up with zero visual interference.
     """
     model = get_model(model)
     for p in model.parameters():
         p.requires_grad = False
 
-    for p in model.cta_adapter.parameters():
-        p.requires_grad = True
-    model.visual_proj.requires_grad_(True)
     model.feature_gate.requires_grad = True
     for p in model.clinical_branch.parameters():
         p.requires_grad = True
@@ -110,22 +117,20 @@ def set_stage_a(model: nn.Module) -> None:
 
 def set_stage_b(model: nn.Module) -> None:
     """
-    Add LoRA adapter training on top of Stage A.
-    Re-initialise condition_net so it relearns with visual LoRA features.
+    Activate the full CTA visual pathway (cta_adapter, visual_proj, LoRA) at low LR.
+    Re-initialise condition_net so Stage A clinical bias does not suppress visual features.
+    Tabular branches continue at reduced LR.
     """
     model = get_model(model)
     for p in model.parameters():
         p.requires_grad = False
 
-    # Reset FiLM conditioning so Stage A clinical bias doesn't dominate
+    # Reset FiLM conditioning so it relearns with visual features from scratch
     for m in model.condition_net.modules():
         if hasattr(m, "reset_parameters"):
             m.reset_parameters()
 
-    # Same branches as Stage A
-    for p in model.cta_adapter.parameters():
-        p.requires_grad = True
-    model.visual_proj.requires_grad_(True)
+    # Tabular + fusion — continue from Stage A at lower LR
     model.feature_gate.requires_grad = True
     for p in model.clinical_branch.parameters():
         p.requires_grad = True
@@ -141,7 +146,10 @@ def set_stage_b(model: nn.Module) -> None:
         for p in model.complications_head.parameters():
             p.requires_grad = True
 
-    # LoRA adapters in Merlin at very low LR
+    # Full CTA visual pathway — all activated together at low LR
+    for p in model.cta_adapter.parameters():
+        p.requires_grad = True
+    model.visual_proj.requires_grad_(True)
     for name, p in model.visual_branch.named_parameters():
         if "lora" in name.lower():
             p.requires_grad = True
@@ -155,8 +163,6 @@ def build_optimizer(model: nn.Module, stage: str) -> torch.optim.Optimizer:
 
     if stage == "A":
         param_groups = [
-            {"params": model.cta_adapter.parameters(),        "lr": 2e-4, "name": "cta_adapter"},
-            {"params": model.visual_proj.parameters(),         "lr": 2e-4, "name": "visual_proj"},
             {"params": [model.feature_gate],                   "lr": 1e-3, "name": "feature_gate"},
             {"params": model.clinical_branch.parameters(),     "lr": 3e-4, "name": "clinical"},
             {"params": model.aaa_metrics_branch.parameters(),  "lr": 3e-4, "name": "aaa"},
@@ -179,8 +185,8 @@ def build_optimizer(model: nn.Module, stage: str) -> torch.optim.Optimizer:
             {"params": model.condition_net.parameters(),       "lr": 5e-5, "name": "condition"},
             {"params": model.fusion_norm.parameters(),         "lr": 5e-5, "name": "fusion_norm"},
             {"params": model.cta_adapter.parameters(),         "lr": 1e-5, "name": "cta_adapter"},
-            {"params": lora_params,                            "lr": 5e-6, "name": "lora"},
             {"params": model.visual_proj.parameters(),         "lr": 1e-5, "name": "visual_proj"},
+            {"params": lora_params,                            "lr": 5e-6, "name": "lora"},
             {"params": model.reintervention_head.parameters(), "lr": 5e-5, "name": "reint_head"},
         ]
         if hasattr(model, "complications_head"):

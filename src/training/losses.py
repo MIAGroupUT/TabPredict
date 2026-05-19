@@ -43,12 +43,17 @@ def _heteroscedastic(
     label_smoothing: float = 0.05,
     pos_weight: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    """Heteroscedastic focal loss for one task. Returns a scalar."""
+    """Heteroscedastic focal loss for one task. Returns a scalar.
+
+    Clamp range is (-4, 2) so the model can express high confidence
+    (logvar=-4 → precision≈54, conf≈0.88) without numerical blow-up.
+    The quadratic penalty (coeff 0.2) prevents logvar from collapsing to
+    the upper boundary (logvar→2) which would suppress the BCE gradient.
+    """
     bce       = _focal_bce_per_sample(logit, gt, focal_gamma, label_smoothing, pos_weight)
-    logvar_c  = logvar.clamp(-2.0, 2.0)
+    logvar_c  = logvar.clamp(-4.0, 2.0)
     precision = torch.exp(-logvar_c)
-    # L2 penalty prevents logvar collapsing to boundary
-    return (precision * bce).mean() + 0.5 * logvar.mean() + 0.05 * logvar.pow(2).mean()
+    return (precision * bce).mean() + 0.5 * logvar.mean() + 0.2 * logvar.pow(2).mean()
 
 
 # ── primary-task-only loss ────────────────────────────────────────────────────
