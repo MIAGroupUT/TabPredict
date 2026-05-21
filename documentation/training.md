@@ -28,18 +28,18 @@ Goal: establish stable multimodal fusion on tabular data before the visual backb
 
 | Frozen | Trainable |
 |---|---|
-| `clinical_branch` | `cta_adapter` |
-| `aaa_metrics_branch` | `visual_proj` |
-| | LoRA adapters on Merlin query/value projections |
+| `visual_branch` base weights (non-LoRA) | LoRA adapters on Merlin query/value projections |
+| | `cta_adapter` |
+| | `visual_proj` |
+| | `clinical_branch` (at reduced LR 5e-5) |
+| | `aaa_metrics_branch` (at reduced LR 5e-5) |
 | | `condition_net` (re-initialised from scratch at stage start) |
 | | `fusion_norm` |
 | | `reintervention_head` |
 | | `complications_head` (if present) |
 | | `feature_gate` |
 
-Goal: adapt the Merlin backbone to this specific task via LoRA, with the tabular branches held fixed to prevent the visual branch from collapsing onto the tabular shortcut. `condition_net` is re-initialised at stage start to remove Stage A's clinical bias from the FiLM modulation.
-
-> **Why freeze the clinical branch in Stage B?** Without this, the model can always improve its training loss by routing more signal through the (already-warm) clinical branch rather than learning from CTA features. Freezing forces the visual LoRA adapters to contribute independently.
+Goal: adapt the Merlin backbone to this specific task via LoRA while the tabular branches continue to refine at a reduced learning rate. `condition_net` is re-initialised at stage start to remove Stage A's clinical bias from the FiLM modulation, giving the newly-active LoRA features a fair chance to influence fusion.
 
 ---
 
@@ -48,7 +48,7 @@ Goal: adapt the Merlin backbone to this specific task via LoRA, with the tabular
 ### `ReinterventionLoss` — Primary Task
 
 ```
-loss = exp(−logvar) × focal_BCE(logit, gt) + 0.5 × logvar + 0.2 × logvar²
+loss = exp(−logvar) × focal_BCE(logit, gt) + 0.5 × (exp(logvar) − 1 − logvar)
 ```
 
 Component by component:
@@ -56,12 +56,10 @@ Component by component:
 | Term | Purpose |
 |---|---|
 | `exp(−logvar) × focal_BCE` | Down-weights loss when the model is uncertain; focal weighting (γ=2) reduces the contribution of easy negatives |
-| `+ 0.5 × logvar` | Linear uncertainty penalty — prevents the model from suppressing all gradients by predicting maximum uncertainty |
-| `+ 0.2 × logvar²` | Quadratic penalty — stronger pull away from the upper logvar clamp (logvar=2 would otherwise suppress the BCE gradient entirely) |
+| `+ 0.5 × (exp(logvar) − 1 − logvar)` | KL-style symmetric prior — minimum is 0 at logvar=0, penalises both logvar→+∞ (exponential) and logvar→−∞ (linear). When train BCE→0 the optimal logvar→0, preventing the train loss from going negative and the val loss from inflating via a large precision amplifier. |
 
 Additional settings:
-- **Label smoothing** ε = 0.02 — slightly softens the hard 0/1 targets
-- **pos_weight** = 3.0 — extra penalty for false negatives; combined with a balanced sampler, this gives re-intervention cases extra emphasis
+- **Label smoothing** ε = 0.05 — slightly softens the hard 0/1 targets
 - **logvar clamp** [-4, 2] applied inside the forward pass before the loss is computed
 
 The forward returns `(loss_scalar, details_dict)` where `details_dict` contains `loss_total`, `loss_reint`, `mean_uncertainty`.
@@ -97,12 +95,13 @@ This pushes feature gate values toward zero for unimportant features, producing 
 
 | Group name | Parameters | LR |
 |---|---|---|
-| `clinical` | `clinical_branch` weights | 5e-4 |
-| `aaa` | `aaa_metrics_branch` weights | 5e-4 |
-| `condition_net` | FiLM condition network | 1e-4 |
-| `reintervention_head` | Reintervention head | 1e-4 |
 | `feature_gate` | Per-feature gate parameter | 1e-3 |
-| `complications_head` | Complication heads (if present) | 1e-4 |
+| `clinical` | `clinical_branch` weights | 3e-4 |
+| `aaa` | `aaa_metrics_branch` weights | 3e-4 |
+| `condition` | FiLM condition network | 2e-4 |
+| `fusion_norm` | LayerNorm | 2e-4 |
+| `reint_head` | Reintervention head | 2e-4 |
+| `comp_head` | Complication heads (if present) | 2e-4 |
 
 Visual branch parameters are not included (frozen → no gradients).
 
@@ -110,17 +109,18 @@ Visual branch parameters are not included (frozen → no gradients).
 
 | Group name | Parameters | LR |
 |---|---|---|
-| `visual` | Merlin ViT base weights | 5e-6 |
-| `lora` | LoRA adapter weights | 5e-6 |
-| `cta_adapter` | CTA input adapter | 1e-4 |
-| `visual_proj` | Visual projection layer | 1e-4 |
-| `condition_net` | FiLM (re-initialised) | 1e-4 |
-| `reintervention_head` | Reintervention head | 1e-4 |
-| `feature_gate` | Per-feature gate | 1e-3 |
-| `fusion_norm` | LayerNorm | 1e-4 |
-| `complications_head` | Complication heads (if present) | 1e-4 |
+| `feature_gate` | Per-feature gate parameter | 3e-4 |
+| `clinical` | `clinical_branch` weights | 5e-5 |
+| `aaa` | `aaa_metrics_branch` weights | 5e-5 |
+| `condition` | FiLM (re-initialised) | 5e-5 |
+| `fusion_norm` | LayerNorm | 5e-5 |
+| `cta_adapter` | CTA input adapter | 1e-5 |
+| `visual_proj` | Visual projection layer | 1e-5 |
+| `lora` | LoRA adapter weights on Merlin | 5e-6 |
+| `reint_head` | Reintervention head | 5e-5 |
+| `comp_head` | Complication heads (if present) | 5e-5 |
 
-Clinical and AAA branches are not included in Stage B (frozen).
+Merlin ViT base weights (non-LoRA) are not included in Stage B (frozen).
 
 ### Learning Rate Schedule
 

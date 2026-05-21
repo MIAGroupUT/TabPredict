@@ -4,9 +4,10 @@ Loss functions for the reintervention risk models.
 ReinterventionLoss           — heteroscedastic focal BCE for the primary task.
 MultiTaskReinterventionLoss  — same primary loss + masked per-complication loss.
 
-Both use heteroscedastic NLL weighting:
-    loss = exp(-logvar) * focal_bce + 0.5 * logvar
-so the model learns to express confidence when correct and uncertainty when wrong.
+Both use heteroscedastic NLL weighting with a KL-style symmetric prior:
+    loss = exp(-logvar) * focal_bce + 0.5 * (exp(logvar) - 1 - logvar)
+The prior has its minimum at logvar=0 and prevents calibration collapse
+(logvar drifting to the clamp boundary, making train loss negative).
 """
 
 from __future__ import annotations
@@ -45,15 +46,16 @@ def _heteroscedastic(
 ) -> torch.Tensor:
     """Heteroscedastic focal loss for one task. Returns a scalar.
 
-    Clamp range is (-4, 2) so the model can express high confidence
-    (logvar=-4 → precision≈54, conf≈0.88) without numerical blow-up.
-    The quadratic penalty (coeff 0.2) prevents logvar from collapsing to
-    the upper boundary (logvar→2) which would suppress the BCE gradient.
+    Uses a KL-style symmetric prior instead of the plain 0.5*logvar entropy term.
+    0.5*(exp(logvar) - 1 - logvar) has its minimum at logvar=0 and penalises
+    both logvar→+inf (exponential) and logvar→-inf (linear -logvar dominates).
+    When train BCE→0 the optimal logvar→0, so train loss cannot go negative
+    and the precision amplifier stays near 1× on memorised training samples.
     """
     bce       = _focal_bce_per_sample(logit, gt, focal_gamma, label_smoothing, pos_weight)
     logvar_c  = logvar.clamp(-4.0, 2.0)
     precision = torch.exp(-logvar_c)
-    return (precision * bce).mean() + 0.5 * logvar.mean() + 0.2 * logvar.pow(2).mean()
+    return (precision * bce).mean() + 0.5 * (logvar.exp() - 1 - logvar).mean()
 
 
 # ── primary-task-only loss ────────────────────────────────────────────────────

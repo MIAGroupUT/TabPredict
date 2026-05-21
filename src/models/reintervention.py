@@ -180,7 +180,7 @@ class ReinterventionRiskModel(nn.Module):
 
     def _film(self, x: torch.Tensor, gamma_beta: torch.Tensor) -> torch.Tensor:
         gamma, beta = gamma_beta.chunk(2, dim=1)
-        return x * (1 + torch.tanh(gamma) * 0.1) + torch.tanh(beta) * 0.1
+        return x * (1 + torch.tanh(gamma) * 0.3) + torch.tanh(beta) * 0.3
 
     def _encode_visual(self, cta: torch.Tensor) -> torch.Tensor:
         v = self.visual_branch(cta)

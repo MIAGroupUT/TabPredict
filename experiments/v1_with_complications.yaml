@@ -23,7 +23,7 @@ model:
     # Endograft-specific
     - migration
     - infection
-  lora_r: 8
+  lora_r: 16
   aaa_dim: 5
 
 training:
@@ -39,7 +39,7 @@ training:
   # Loss hyperparameters
   focal_gamma: 2.0
   label_smoothing: 0.02      # Reduced: small dataset benefits from sharper targets
-  pos_weight: 3.0            # Extra penalty on FN on top of 50/50 balanced sampler
+  pos_weight: 1.0            # Sampler already balances batches 50/50; no double-counting
   gate_l1_weight: 0.0001     # Reduced: allow more clinical features through the gate
   recall_beta: 2.0           # F-beta threshold selection; beta>1 weights recall over precision
 

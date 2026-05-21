@@ -14,7 +14,7 @@ def organize_multimodal_dataset(
     """
     Organize a multimodal dataset into a structured training directory.
 
-    This function takes the output JSON from the 01_data_matching.py pipeline
+    This function takes the output JSON from the 03_data_matching.py pipeline
     and copies all associated modalities into a clean training folder.
 
     Expected input structure (per patient):
