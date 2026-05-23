@@ -68,7 +68,7 @@ _DICOM_MODALITY_MAP = {
 
 def read_dicom_modality(dicom_dir: Path) -> str:
     """Return the normalised modality label from the first readable DICOM file."""
-    for f in dicom_dir.glob("*"):
+    for f in dicom_dir.rglob("*"):
         if not f.is_file():
             continue
         try:
@@ -97,7 +97,7 @@ def score_dicom_series(dicom_dir: Path) -> float:
     Resolution (slice thickness + slice count) is weighted heavily so that a
     0.625 mm thin-slice series always wins over a 3 mm or 5 mm reconstruction.
     """
-    files = [f for f in dicom_dir.glob("*") if f.is_file()]
+    files = [f for f in dicom_dir.rglob("*") if f.is_file()]
     if not files:
         return -1.0
 
@@ -163,8 +163,8 @@ def find_best_dicom_dir(session_dir: Path, modality: str) -> Path | None:
     candidates = []
     try:
         dicom_dirs = [
-            d for d in session_dir.rglob("DICOM")
-            if d.is_dir() and d.parent.name == "resources"
+            d for d in session_dir.rglob("files")
+            if d.is_dir() and d.parent.name == "DICOM"
         ]
     except (PermissionError, OSError) as e:
         print(f"    [!]  Cannot walk {session_dir}: {e}")
@@ -178,7 +178,7 @@ def find_best_dicom_dir(session_dir: Path, modality: str) -> Path | None:
         if modality == "CT":
             s = score_dicom_series(dicom_dir)
         else:
-            files = [f for f in dicom_dir.glob("*") if f.is_file()]
+            files = [f for f in dicom_dir.rglob("*") if f.is_file()]
             s = len(files) if len(files) >= 5 else -1  # skip tiny scouts
 
         candidates.append((s, dicom_dir))
@@ -188,7 +188,8 @@ def find_best_dicom_dir(session_dir: Path, modality: str) -> Path | None:
 
     candidates.sort(key=lambda x: x[0], reverse=True)
     best_score, best_dir = candidates[0]
-    print(f"    Best series: {best_dir.parent.name} (score={best_score:.0f})")
+    series_name = best_dir.parent.parent.parent.name
+    print(f"    Best series: {series_name} (score={best_score:.0f})")
     return best_dir
 
 
@@ -196,8 +197,8 @@ def _enumerate_modalities(session_dir: Path) -> list[str]:
     """Return sorted list of distinct modalities found in a session directory."""
     seen: set[str] = set()
     try:
-        for dicom_dir in session_dir.rglob("DICOM"):
-            if not (dicom_dir.is_dir() and dicom_dir.parent.name == "resources"):
+        for dicom_dir in session_dir.rglob("files"):
+            if not (dicom_dir.is_dir() and dicom_dir.parent.name == "DICOM"):
                 continue
             mod = read_dicom_modality(dicom_dir)
             if mod != "UNKNOWN":
@@ -232,8 +233,8 @@ def session_modality(session_id: str, site_abbr: str, session_dir: Path) -> str:
         return "UNKNOWN"
 
     if site_abbr == "UMCG":
-        for dicom_dir in session_dir.rglob("DICOM"):
-            if dicom_dir.is_dir() and dicom_dir.parent.name == "resources":
+        for dicom_dir in session_dir.rglob("files"):
+            if dicom_dir.is_dir() and dicom_dir.parent.name == "DICOM":
                 return read_dicom_modality(dicom_dir)
         return "UNKNOWN"
 
@@ -242,8 +243,8 @@ def session_modality(session_id: str, site_abbr: str, session_dir: Path) -> str:
     if m:
         raw = m.group(1)
         return _DICOM_MODALITY_MAP.get(raw, raw)
-    for dicom_dir in session_dir.rglob("DICOM"):
-        if dicom_dir.is_dir() and dicom_dir.parent.name == "resources":
+    for dicom_dir in session_dir.rglob("files"):
+        if dicom_dir.is_dir() and dicom_dir.parent.name == "DICOM":
             return read_dicom_modality(dicom_dir)
     return "UNKNOWN"
 
@@ -335,7 +336,7 @@ def convert_all_sessions(DATA_ROOT: str, output_dir: str) -> None:
                     modality   = session_modality(session_id, site_abbr, session_dir)
 
                     if modality == "UNKNOWN":
-                        print(f"    [??] {session_id} — unknown modality, skipped")
+                        print(f"    [??] {session_id} — unknown modality {modality}, skipped")
                         continue
 
                     out_name = f"{raw_patient_id}_{site_abbr}_{session_id}.nii.gz"

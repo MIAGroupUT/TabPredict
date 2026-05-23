@@ -25,7 +25,8 @@ def copy_and_rename_radar_files(source_dir, target_dir):
         if match:
             # Extract the ID (e.g., 118)
             file_id = match.group(1)
-            new_name = f"{file_id}_MST.vtp"
+            # Match the flat-session NIfTI naming: {folder_id}_{site}_{folder_id}_{modality}_{index}
+            new_name = f"{file_id}_MST_{file_id}_CT_1.vtp"
             
             source_path = os.path.join(source_dir, filename)
             target_path = os.path.join(target_dir, new_name)
@@ -42,6 +43,6 @@ def copy_and_rename_radar_files(source_dir, target_dir):
 if __name__ == "__main__":
     # Update these paths to your specific local directories
     SOURCE_PATH = "/deepstore/datasets/mia/AI4EVAR/raw_data/CFDs/ensemble_predictions_v3--AAA-full-all"
-    TARGET_PATH = "/deepstore/datasets/mia/AI4EVAR/raw_data/CFDs/renamed"
+    TARGET_PATH = "/deepstore/datasets/mia/AI4EVAR/raw_data/CFDs/renamed_v2"
 
     copy_and_rename_radar_files(SOURCE_PATH, TARGET_PATH)

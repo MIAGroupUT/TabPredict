@@ -2,7 +2,7 @@
 
 ## Overview
 
-Training runs in two sequential stages. Each stage loads the best checkpoint from the previous one. Stage A warms up the tabular (clinical + AAA) branches while the visual backbone is frozen. Stage B unfreezes the LoRA adapters and adapts the backbone to the task.
+Training runs in two sequential stages. Each stage loads the best checkpoint from the previous one. Stage A warms up the tabular (clinical + AAA) branches while the visual backbone is fully frozen. Stage B unfreezes the BatchNorm layers of the I3ResNet image encoder (layer3/4) alongside the visual projection and CTA adapter, allowing scanner-domain adaptation.
 
 The entry point is `scripts/train.py`, which loads a YAML config and calls `src.training.trainer.run_pipeline(cfg)`.
 
@@ -28,7 +28,7 @@ Goal: establish stable multimodal fusion on tabular data before the visual backb
 
 | Frozen | Trainable |
 |---|---|
-| `visual_branch` base weights (non-LoRA) | LoRA adapters on Merlin query/value projections |
+| I3ResNet conv weights (layer1–4) | I3ResNet BatchNorm γ/β in layer3 and layer4 |
 | | `cta_adapter` |
 | | `visual_proj` |
 | | `clinical_branch` (at reduced LR 5e-5) |
@@ -39,7 +39,7 @@ Goal: establish stable multimodal fusion on tabular data before the visual backb
 | | `complications_head` (if present) |
 | | `feature_gate` |
 
-Goal: adapt the Merlin backbone to this specific task via LoRA while the tabular branches continue to refine at a reduced learning rate. `condition_net` is re-initialised at stage start to remove Stage A's clinical bias from the FiLM modulation, giving the newly-active LoRA features a fair chance to influence fusion.
+Goal: recalibrate the Merlin backbone's feature statistics to the specific scanner types in this cohort (RNST, MST, UMCG, AUMC) using BatchNorm adaptation (~50 K params), while tabular branches continue to refine at a reduced learning rate. `condition_net` is re-initialised at stage start so Stage A's clinical-only bias does not suppress the newly-active visual features.
 
 ---
 
@@ -116,11 +116,11 @@ Visual branch parameters are not included (frozen → no gradients).
 | `fusion_norm` | LayerNorm | 5e-5 |
 | `cta_adapter` | CTA input adapter | 1e-5 |
 | `visual_proj` | Visual projection layer | 1e-5 |
-| `lora` | LoRA adapter weights on Merlin | 5e-6 |
+| `i3resnet_bn` | BatchNorm γ/β in I3ResNet layer3+4 | 1e-5 |
 | `reint_head` | Reintervention head | 5e-5 |
 | `comp_head` | Complication heads (if present) | 5e-5 |
 
-Merlin ViT base weights (non-LoRA) are not included in Stage B (frozen).
+I3ResNet convolutional weights are not updated in Stage B (frozen); only BatchNorm statistics are adapted.
 
 ### Learning Rate Schedule
 
@@ -149,9 +149,9 @@ At inference time, dropout is never applied. `maybe_apply_modality_dropout(is_tr
 
 ---
 
-## Balanced Sampler
+## Class Imbalance Handling
 
-The training DataLoader uses a weighted sampler so that each batch sees approximately equal numbers of re-intervention positive and negative cases. Combined with `pos_weight=3.0` in the loss, this gives the model two layers of correction for the class imbalance typical in EVAR cohorts.
+The training set has approximately 18% positive (reintervention) cases. Rather than a balanced sampler (which would create a distribution shift between training and test that miscalibrates output probabilities), the DataLoader uses `shuffle=True` with the natural class distribution. The loss compensates via `pos_weight = N_neg / N_pos ≈ 4.58`, which weights missed positives ~4.6× more heavily than missed negatives. This keeps the model probability outputs calibrated to the true population prevalence.
 
 ---
 

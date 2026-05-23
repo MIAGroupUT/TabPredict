@@ -22,7 +22,6 @@ model:
                               # List complications to enable the multi-task head, e.g.:
                               # ["endoleak_1a","endoleak_1b","endoleak_2","endoleak_3",
                               #  "endoleak_5","migration","infection"]
-  lora_r: 8                   # LoRA rank for Merlin adapter (query + value projections)
   aaa_dim: 5                  # number of AAA geometry metrics (do not change)
 
 # ── Training ──────────────────────────────────────────────────────────────────
@@ -36,7 +35,7 @@ training:
   # Loss parameters
   focal_gamma: 2.0            # focal loss exponent (down-weights easy negatives)
   label_smoothing: 0.02       # soft target smoothing (reduces overconfidence)
-  pos_weight: 3.0             # BCE positive class weight (extra penalty for FN)
+  pos_weight: 4.58            # BCE positive class weight = N_neg/N_pos (302/66 in training set)
   gate_l1_weight: 0.0001      # L1 regularisation weight on feature gate
 
   # Threshold selection
@@ -120,7 +119,7 @@ python scripts/train.py --config experiments/v1_no_complications.yaml \
     --set training.batch_size=4 \
           training.stages[0].epochs=2 \
           wandb.mode=disabled \
-          model.lora_r=4
+          training.pos_weight=4.58
 ```
 
 Coercion rules:

@@ -150,8 +150,15 @@ def set_stage_b(model: nn.Module) -> None:
     for p in model.cta_adapter.parameters():
         p.requires_grad = True
     model.visual_proj.requires_grad_(True)
+
+    # Unfreeze BatchNorm gamma/beta in I3ResNet layer3 and layer4.
+    # BN adaptation recalibrates feature statistics for different scanner
+    # protocols (MST/UMCG/AUMC) without touching the learned conv weights.
+    # Filter strictly to encode_image to avoid touching the text encoder.
     for name, p in model.visual_branch.named_parameters():
-        if "lora" in name.lower():
+        if ("encode_image" in name
+                and ("layer3" in name or "layer4" in name)
+                and ".bn" in name):
             p.requires_grad = True
 
 
@@ -176,8 +183,10 @@ def build_optimizer(model: nn.Module, stage: str) -> torch.optim.Optimizer:
             )
 
     elif stage == "B":
-        lora_params = [p for n, p in model.visual_branch.named_parameters()
-                       if "lora" in n.lower()]
+        bn_image_params = [p for n, p in model.visual_branch.named_parameters()
+                           if "encode_image" in n
+                           and ("layer3" in n or "layer4" in n)
+                           and ".bn" in n]
         param_groups = [
             {"params": [model.feature_gate],                   "lr": 3e-4, "name": "feature_gate"},
             {"params": model.clinical_branch.parameters(),     "lr": 5e-5, "name": "clinical"},
@@ -186,7 +195,7 @@ def build_optimizer(model: nn.Module, stage: str) -> torch.optim.Optimizer:
             {"params": model.fusion_norm.parameters(),         "lr": 5e-5, "name": "fusion_norm"},
             {"params": model.cta_adapter.parameters(),         "lr": 1e-5, "name": "cta_adapter"},
             {"params": model.visual_proj.parameters(),         "lr": 1e-5, "name": "visual_proj"},
-            {"params": lora_params,                            "lr": 5e-6, "name": "lora"},
+            {"params": bn_image_params,                        "lr": 1e-5, "name": "i3resnet_bn"},
             {"params": model.reintervention_head.parameters(), "lr": 5e-5, "name": "reint_head"},
         ]
         if hasattr(model, "complications_head"):
@@ -215,15 +224,20 @@ def count_trainable(obj: nn.Module | nn.Parameter) -> tuple[int, int]:
 
 def print_model_param_overview(model: nn.Module) -> None:
     model = get_model(model)
+    # Count BN-adapted I3ResNet params separately for clarity
+    bn_params = [p for n, p in model.visual_branch.named_parameters()
+                 if "encode_image" in n and ("layer3" in n or "layer4" in n) and ".bn" in n]
+    bn_trainable = sum(p.numel() for p in bn_params if p.requires_grad)
+    bn_total = sum(p.numel() for p in bn_params)
     sections = [
-        ("clinical_branch",     model.clinical_branch),
-        ("feature_gate",        model.feature_gate),
-        ("aaa_metrics_branch",  model.aaa_metrics_branch),
-        ("visual_branch (LoRA)", model.visual_branch),
-        ("visual_proj",         model.visual_proj),
-        ("condition_net",       model.condition_net),
-        ("fusion_norm",         model.fusion_norm),
-        ("reintervention_head", model.reintervention_head),
+        ("clinical_branch",       model.clinical_branch),
+        ("feature_gate",          model.feature_gate),
+        ("aaa_metrics_branch",    model.aaa_metrics_branch),
+        ("visual_backbone (full)", model.visual_branch),
+        ("visual_proj",           model.visual_proj),
+        ("condition_net",         model.condition_net),
+        ("fusion_norm",           model.fusion_norm),
+        ("reintervention_head",   model.reintervention_head),
     ]
     if hasattr(model, "complications_head"):
         sections.append(("complications_head", model.complications_head))

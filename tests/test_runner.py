@@ -73,7 +73,7 @@ def _make_test_batch(pid: str = "P001", n_comp: int = 0) -> dict:
 def _base_cfg(base_dir: str) -> dict:
     return {
         "name": "test_run",
-        "model": {"aaa_dim": AAA_DIM, "lora_r": 4, "complications": []},
+        "model": {"aaa_dim": AAA_DIM, "complications": []},
         "training": {
             "image_size":    [SPATIAL, SPATIAL, SPATIAL],
             "voxel_spacing": [1.5, 1.5, 1.5],

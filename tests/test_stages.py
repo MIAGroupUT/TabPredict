@@ -6,7 +6,7 @@ Covers:
 - causal_modality_dropout: shape preservation, causal constraint
 - maybe_apply_modality_dropout: no-op outside training
 - set_stage_a: correct freeze/unfreeze pattern
-- set_stage_b: condition_net reset + LoRA enabled (even if empty with mock)
+- set_stage_b: condition_net reset + I3ResNet BN layers + visual pathway unfrozen
 - build_optimizer: correct param groups per stage, raises on unknown stage
 - count_trainable: correct totals for module and parameter
 - print_model_param_overview: runs without error
@@ -263,14 +263,14 @@ def test_build_optimizer_stage_a_with_comp_group_count(fresh_model_with_comp):
 def test_build_optimizer_stage_b_group_count(fresh_model_no_comp):
     from src.training.stages import build_optimizer
     opt = build_optimizer(fresh_model_no_comp, "B")
-    assert len(opt.param_groups) == 9  # tabular + cta_adapter + visual_proj + lora + head
+    assert len(opt.param_groups) == 9  # tabular + cta_adapter + visual_proj + i3resnet_bn + head
 
 
-def test_build_optimizer_stage_b_lora_lr(fresh_model_no_comp):
+def test_build_optimizer_stage_b_i3resnet_bn_lr(fresh_model_no_comp):
     from src.training.stages import build_optimizer
     opt    = build_optimizer(fresh_model_no_comp, "B")
     groups = {g["name"]: g for g in opt.param_groups}
-    assert groups["lora"]["lr"] == pytest.approx(5e-6)
+    assert groups["i3resnet_bn"]["lr"] == pytest.approx(1e-5)
 
 
 def test_build_optimizer_stage_a_lr_ordering(fresh_model_no_comp):

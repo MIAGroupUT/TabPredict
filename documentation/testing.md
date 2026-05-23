@@ -154,7 +154,7 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 - Returns `AdamW`
 - Correct group count for Stage A (6 no-comp, 7 with-comp)
 - Correct group count for Stage B (9 no-comp, 10 with-comp)
-- LoRA group LR is 5e-6 in Stage B
+- `i3resnet_bn` group LR is 1e-5 in Stage B
 - `feature_gate` has the highest LR in Stage A
 - Stage `"C"` raises `ValueError`
 
@@ -224,11 +224,11 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 
 **`build_loaders`:**
 - Returns a `(train_loader, val_loader)` tuple
-- Train DataLoader is built with a `WeightedRandomSampler` (class-balanced ~50/50)
+- Train DataLoader is built with `shuffle=True` (natural class distribution; imbalance handled via `pos_weight` in the loss)
 - Val DataLoader is built with `shuffle=False` (deterministic evaluation order)
 - Requested `batch_size` is forwarded to both loaders
 
-`CacheDataset` and `torch.utils.data.DataLoader` are mocked so no NIfTI files or GPU workers are needed; `WeightedRandomSampler` is left real to verify the balanced-sampling logic runs.
+`CacheDataset` and `torch.utils.data.DataLoader` are mocked so no NIfTI files or GPU workers are needed.
 
 ---
 

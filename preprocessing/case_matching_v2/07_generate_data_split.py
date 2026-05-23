@@ -1,5 +1,5 @@
 """
-06_generate_data_split.py — Patient-level stratified train/val/test split (v2)
+06_generate_data_split.py — Patient-level stratified train/val/test split
 ==================================================================================
 
 Splits at PATIENT level (not scan level), stratified by site + reintervention label.
@@ -10,7 +10,7 @@ scans end up in the same set so there is no data leakage across splits.
 The split JSON records patient keys (e.g. "2637442_AUMC").
 The DataLoader must expand these to individual scan NIfTIs at training time.
 
-Output: training_subset_v2/dataset_splits.json
+Output: training_subset_v1/dataset_splits.json
 {
   "train":    ["2637442_AUMC", "387_UMCG", ...],
   "val":      [...],
@@ -39,9 +39,9 @@ def generate_split(
     Parameters
     ----------
     base_dir : str
-        training_subset_v2 root (imagesTr/ expected here).
+        training_subset_v1 root (imagesTr/ expected here).
     config_json : str
-        Path to radar_multimodal_config_v2.json.
+        Path to radar_multimodal_config_v1.json.
     seed : int
         Random seed for determinism.
     ratios : tuple
@@ -104,7 +104,7 @@ def generate_split(
 
     # ---- Report ----
     print("\n" + "=" * 85)
-    print(f" V2 PATIENT-LEVEL SPLIT | Seed: {seed}")
+    print(f" V1 PATIENT-LEVEL SPLIT | Seed: {seed}")
     print("=" * 85)
     print(f"{'Split':<8} | {'Patients':<8} | {'Pos':<5} | {'Neg':<5} | {'Prev':>7} | Site distribution")
     print("-" * 85)
@@ -135,6 +135,6 @@ def generate_split(
 # =========================================================
 if __name__ == "__main__":
     BASE_DIR    = "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v2"
-    CONFIG_JSON = f"{BASE_DIR}/clinical_data/radar_multimodal_config_v2.json"
+    CONFIG_JSON = f"{BASE_DIR}/clinical_data/radar_multimodal_config_v1.json"
 
     generate_split(BASE_DIR, CONFIG_JSON, seed=3299, ratios=(0.7, 0.1, 0.2))

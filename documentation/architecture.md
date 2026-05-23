@@ -7,7 +7,7 @@
 ```
 CTA volume (4-ch, 128³)
     → cta_adapter (Conv3d 4→1)
-    → Merlin 3D ViT + LoRA adapters
+    → Merlin I3ResNet (frozen, BN adapted in Stage B)
     → visual_proj (Linear 2048→256)           → 256-dim visual embedding ─────┐
                                                                               │
 Clinical tabular (~744 features, z-normalised)                                │
@@ -37,9 +37,9 @@ AAA geometry (5 scalars)                                                      �
 
 | Component | Detail |
 |---|---|
-| `cta_adapter` | `Conv3d(4, 1, kernel_size=1)` — collapses the 4-channel CTA tensor to 1 channel before Merlin |
-| Backbone | Merlin 3D ViT pretrained on 110k CT scans; produces a **(B, 2048)** embedding |
-| Adaptation | LoRA adapters on query and value projections, rank `lora_r` (default 8) |
+| `cta_adapter` | `Conv3d(4→8→1)` — projects the 4-channel CTA tensor to 1 channel before Merlin |
+| Backbone | Merlin I3ResNet pretrained on 110k CT scans; produces a **(B, 2048)** embedding |
+| Adaptation | Stage B unfreezes BatchNorm γ/β in I3ResNet `layer3` and `layer4` (~50 K params); recalibrates feature statistics for scanner-type variation |
 | `visual_proj` | `Linear(2048, 256)` — projects to shared embedding dimension |
 
 The 4-channel CTA input concatenates: CT intensity · lumen segmentation mask · ILT segmentation mask · distance map (see [Data](data.md) for how this is assembled).
@@ -151,8 +151,8 @@ fused = model(cta, clin, aaa, return_fused=True)   # (B, 320)
 
 | Choice | Rationale |
 |---|---|
-| Merlin 3D ViT backbone | Pretrained on 110k CT scans; strong 3D medical imaging priors without training from scratch |
-| LoRA (r=8) | Parameter-efficient backbone adaptation; avoids catastrophic forgetting of pretrained features |
+| Merlin I3ResNet backbone | Pretrained on 110k CT scans; strong 3D medical imaging priors without training from scratch |
+| BN-only adaptation (layer3/4) | Recalibrates feature statistics per scanner type with ~50 K params; avoids catastrophic forgetting while correcting scanner-domain bias |
 | FiLM clamped to ±0.1 | Stable cross-modal modulation; prevents the fusion layer from overwhelming the branch representations |
 | Per-feature sigmoid gate (L1-regularised) | Soft feature selection over ~744 clinical features; interpretable — gate values can be inspected post-training |
 | Heteroscedastic log-variance, clamped [-4, 2] | Lets the model express calibrated confidence; quadratic penalty prevents degenerate high-uncertainty predictions |

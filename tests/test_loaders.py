@@ -476,8 +476,8 @@ def test_build_loaders_returns_two_dataloaders(mock_cache, mock_dl, tmp_path):
 
 @patch("torch.utils.data.DataLoader")
 @patch("src.data.loaders.CacheDataset")
-def test_build_loaders_train_uses_weighted_sampler(mock_cache, mock_dl, tmp_path):
-    """Train DataLoader must be built with a WeightedRandomSampler for class balance."""
+def test_build_loaders_train_uses_shuffle(mock_cache, mock_dl, tmp_path):
+    """Train DataLoader must use shuffle=True (natural class distribution; pos_weight handles imbalance)."""
     from src.data.loaders import build_loaders
     mock_cache.return_value = MagicMock(__len__=lambda s: 4)
     splits, config, feature_names, clin_mean, clin_std = _build_loaders_args(tmp_path)
@@ -487,8 +487,8 @@ def test_build_loaders_train_uses_weighted_sampler(mock_cache, mock_dl, tmp_path
         base_dir=tmp_path, cache_dir=tmp_path / "cache", batch_size=2,
     )
     train_kwargs = mock_dl.call_args_list[0].kwargs
-    assert "sampler" in train_kwargs
-    assert isinstance(train_kwargs["sampler"], WeightedRandomSampler)
+    assert "sampler" not in train_kwargs
+    assert train_kwargs.get("shuffle") is True
 
 
 @patch("torch.utils.data.DataLoader")

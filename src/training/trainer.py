@@ -337,7 +337,6 @@ def run_pipeline(cfg: dict) -> None:
             "clinical_dim":      len(feature_names),
             "num_complications": len(complications),
             "batch_size":        batch_size,
-            "lora_r":            cfg["model"].get("lora_r", 8),
             "with_complications": with_comp,
         },
     )
@@ -347,7 +346,6 @@ def run_pipeline(cfg: dict) -> None:
         clinical_dim=len(feature_names),
         aaa_dim=cfg["model"].get("aaa_dim", 5),
         complications=complications,
-        lora_r=cfg["model"].get("lora_r", 8),
     ).to(DEVICE)
 
     if torch.cuda.device_count() > 1:

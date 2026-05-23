@@ -1,8 +1,8 @@
 """
-05_nnUNet_labels_metrics_generation.py — nnUNet inference + AAA metrics (v2, CT only)
+05_nnUNet_labels_metrics_generation.py — nnUNet inference + AAA metrics (v1, CT only)
 =======================================================================================
 
-Processes CT NIfTIs in training_subset_v2/imagesTr/.
+Processes CT NIfTIs in training_subset_v1/imagesTr/.
 All other modalities (MR, US, XR, PET, XA, …) are skipped — the nnUNet model was
 trained on CTA and segmentation on other modalities is not supported.
 
@@ -17,8 +17,8 @@ All outputs use the same file stem as the input NIfTI, e.g.:
 Usage
 -----
 python 05_nnUNet_labels_metrics_generation.py \
-    --input    /deepstore/.../training_subset_v2/imagesTr \
-    --output-dir /deepstore/.../training_subset_v2 \
+    --input    /deepstore/.../training_subset_v1/imagesTr \
+    --output-dir /deepstore/.../training_subset_v1 \
     --checkpoint-dir /path/to/nnunet_model \
     [--device cpu|cuda]
 """
@@ -129,9 +129,9 @@ def run_prediction(
 # =========================================================
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="nnUNet v2 inference + AAA metrics for all CT scans")
+    ap = argparse.ArgumentParser(description="nnUNet inference + AAA metrics for all CT scans")
     ap.add_argument("--input",          required=True,  help="imagesTr directory")
-    ap.add_argument("--output-dir",     required=True,  help="training_subset_v2 root")
+    ap.add_argument("--output-dir",     required=True,  help="training_subset_v1 root")
     ap.add_argument("--checkpoint-dir", required=True,  help="nnUNet trained model folder")
     ap.add_argument("--device",         default="cuda", choices=["cpu", "cuda"])
     args = ap.parse_args()

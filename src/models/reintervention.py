@@ -13,7 +13,6 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from peft import LoraConfig, get_peft_model
 from merlin import Merlin
 
 # ── canonical complication lists (choose one per experiment config) ──────────
@@ -110,7 +109,6 @@ class ReinterventionRiskModel(nn.Module):
         complications:  List of complication names.  Empty list → no
                         complications head; forward returns 2 tensors.
                         Non-empty → adds complications_head; forward returns 4.
-        lora_r:         LoRA rank for Merlin visual backbone.
     """
 
     def __init__(
@@ -118,7 +116,6 @@ class ReinterventionRiskModel(nn.Module):
         clinical_dim: int = 744,
         aaa_dim: int = 5,
         complications: list[str] | None = None,
-        lora_r: int = 8,
     ) -> None:
         super().__init__()
         self.complications = list(complications or [])
@@ -128,15 +125,8 @@ class ReinterventionRiskModel(nn.Module):
         self.cta_adapter = nn.Sequential(
             nn.Conv3d(4, 8, 3, padding=1), nn.ReLU(), nn.Conv3d(8, 1, 1)
         )
-        _visual_base = Merlin(ImageEmbedding=True)
-        disable_checkpointing(_visual_base)
-        self.visual_branch = get_peft_model(
-            _visual_base,
-            LoraConfig(
-                r=lora_r,
-                target_modules=["query", "value", "query_global", "value_global"],
-            ),
-        )
+        self.visual_branch = Merlin(ImageEmbedding=True)
+        disable_checkpointing(self.visual_branch)
         self.visual_proj = nn.Linear(2048, 256)
 
         # ── tabular pathways ─────────────────────────────────────────────

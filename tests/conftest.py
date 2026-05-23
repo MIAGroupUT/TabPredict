@@ -1,8 +1,8 @@
 """
 Shared fixtures and heavy-dependency mocks for the AI4EVAR test suite.
 
-merlin and peft are patched into sys.modules BEFORE any src.* import so the
-test process never needs those packages installed.  All tests run on CPU only.
+merlin is patched into sys.modules BEFORE any src.* import so the
+test process never needs that package installed.  All tests run on CPU only.
 """
 
 from __future__ import annotations
@@ -40,11 +40,6 @@ _merlin_mod = MagicMock()
 _merlin_mod.Merlin = _MockMerlin
 sys.modules.setdefault("merlin", _merlin_mod)
 
-_peft_mod = MagicMock()
-_peft_mod.LoraConfig = MagicMock
-_peft_mod.get_peft_model = lambda model, config: model  # identity — no LoRA wrapping
-sys.modules.setdefault("peft", _peft_mod)
-
 # ── shared dimension constants ─────────────────────────────────────────────────
 
 CLINICAL_DIM = 8   # real = 744; tiny for speed
@@ -61,8 +56,7 @@ SPATIAL = 6        # tiny spatial dims for CPU speed
 def model_no_comp():
     from src.models.reintervention import ReinterventionRiskModel
     return ReinterventionRiskModel(
-        clinical_dim=CLINICAL_DIM, aaa_dim=AAA_DIM, complications=[], lora_r=4
-    ).eval()
+        clinical_dim=CLINICAL_DIM, aaa_dim=AAA_DIM, complications=[]    ).eval()
 
 
 @pytest.fixture(scope="session")
@@ -70,8 +64,7 @@ def model_with_comp():
     from src.models.reintervention import ReinterventionRiskModel
     return ReinterventionRiskModel(
         clinical_dim=CLINICAL_DIM, aaa_dim=AAA_DIM,
-        complications=COMPLICATIONS, lora_r=4
-    ).eval()
+        complications=COMPLICATIONS    ).eval()
 
 
 # ── function-scoped model fixtures (safe to mutate in stage/optimizer tests) ──
@@ -81,8 +74,7 @@ def model_with_comp():
 def fresh_model_no_comp():
     from src.models.reintervention import ReinterventionRiskModel
     return ReinterventionRiskModel(
-        clinical_dim=CLINICAL_DIM, aaa_dim=AAA_DIM, complications=[], lora_r=4
-    )
+        clinical_dim=CLINICAL_DIM, aaa_dim=AAA_DIM, complications=[]    )
 
 
 @pytest.fixture
@@ -90,8 +82,7 @@ def fresh_model_with_comp():
     from src.models.reintervention import ReinterventionRiskModel
     return ReinterventionRiskModel(
         clinical_dim=CLINICAL_DIM, aaa_dim=AAA_DIM,
-        complications=COMPLICATIONS, lora_r=4
-    )
+        complications=COMPLICATIONS    )
 
 
 # ── standard tensor fixtures ──────────────────────────────────────────────────

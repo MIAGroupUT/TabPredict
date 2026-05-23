@@ -1,5 +1,5 @@
 """
-01_build_session_index.py — Build a per-patient session index from data (v2 pipeline)
+01_build_session_index.py — Build a per-patient session index from data
 ==========================================================================================
 
 Walks data/ and produces a JSON index of every imaging session per patient,
@@ -22,7 +22,7 @@ Two XNAT session layouts are handled:
 For flat-session sites a synthetic session_id "{patient_id}_{modality}_1" is created
 so the index is uniform across all sites.
 
-Output: session_index_v2.json
+Output: session_index_v1.json
 
 Session index structure
 -----------------------
@@ -109,7 +109,7 @@ _DICOM_MODALITY_MAP = {
 
 def _modality_from_dicom_dir(dicom_dir: Path) -> str:
     """Read normalised modality from a specific DICOM directory (no recursion)."""
-    for f in dicom_dir.glob("*"):
+    for f in dicom_dir.rglob("*"):
         if not f.is_file():
             continue
         try:
@@ -125,8 +125,8 @@ def read_dicom_modality(session_dir: Path) -> str:
     """Read normalised modality by searching recursively for DICOM dirs in session_dir."""
     try:
         dicom_dirs = [
-            d for d in session_dir.rglob("DICOM")
-            if d.is_dir() and d.parent.name == "resources"
+            d for d in session_dir.rglob("files")
+            if d.is_dir() and d.parent.name == "DICOM"
         ]
     except (PermissionError, OSError):
         return "UNKNOWN"
@@ -205,8 +205,8 @@ def _build_sessions_flat(patient_dir: Path, patient_id: str) -> list[dict]:
     sessions: list[dict] = []
     try:
         dicom_dirs = [
-            d for d in session_dir.rglob("DICOM")
-            if d.is_dir() and d.parent.name == "resources"
+            d for d in session_dir.rglob("files")
+            if d.is_dir() and d.parent.name == "DICOM"
         ]
     except (PermissionError, OSError):
         return []
@@ -317,7 +317,7 @@ def build_session_index(DATA_ROOT: str) -> dict:
 # =========================================================
 if __name__ == "__main__":
     DATA_ROOT   = "/deepstore/datasets/mia/AI4EVAR/raw_data/RADAR_XNat/data"
-    OUTPUT_JSON = "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v2/clinical_data/session_index_v2.json"
+    OUTPUT_JSON = "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v2/clinical_data/session_index_v1.json"
 
     index = build_session_index(DATA_ROOT)
 

@@ -119,7 +119,6 @@ def run_test(
         clinical_dim=len(feature_names),
         aaa_dim=cfg["model"].get("aaa_dim", 5),
         complications=complications,
-        lora_r=cfg["model"].get("lora_r", 8),
     ).to(DEVICE)
     load_checkpoint(model, checkpoint_path, device=DEVICE)
     model.eval()
