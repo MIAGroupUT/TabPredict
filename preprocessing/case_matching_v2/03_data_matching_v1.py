@@ -4,69 +4,81 @@
 
 Combines:
   - SPSS .sav clinical database  (ground truth + clinical features)
-  - session_index_v1.json        (imaging sessions from data)
+  - session_index_v1.json        (imaging sessions from data, including scan_date)
 
 Output: radar_multimodal_config_v1.json
+
+Pre-op / post-op classification
+--------------------------------
+P_IP_P_Date (implant-procedure date) from SPSS is the hard boundary:
+  - scan_date <=  P_IP_P_Date  →  pre-op
+  - scan_date >   P_IP_P_Date  →  post-op
+
+The pre_op CT entry is the CT scan with the scan_date closest to P_IP_P_Date.
+Earlier pre-op CTs are placed in pre_op_other.
+
+If P_IP_P_Date is missing for a patient, or a session has no scan_date, those sessions
+are placed in an "undated" list and a warning is printed; the patient is still included
+in the output (pre_op will be null if no datable pre-op CT is found).
 
 JSON structure (per patient)
 ----------------------------
 {
   "{spss_id}_{site_abbr}": {
     "metadata": {
-      "id":              "{spss_id}",          // SPSS-normalised (no leading zeros)
-      "original_nr":     "{raw_patient_id}",   // as stored in SPSS PatientNr
-      "site":            "008 - AmsterdamUMC",   // or "007 - MST" / "009 - UMCG" / RNST
+      "id":              "{spss_id}",
+      "original_nr":     "{raw_patient_id}",
+      "site":            "008 - AmsterdamUMC",
       "site_short":      "AUMC",
-      "folder_id":       "02637442"            // raw folder name in data
+      "folder_id":       "02637442",
+      "op_date":         "2004-10-19"          // ISO date of implant procedure; null if missing
     },
     "scans": {
       "pre_op": {
-        "session_id":        "02637442_CT_1",
+        "session_id":        "02637442_CT_2",
         "modality":          "CT",
-        "modality_index":    1,
-        "file_stem":         "2637442_AUMC_s001_CT",
-        "dicom_session_dir": "/.../02637442/02637442_CT_1",
-        "nifti":             "/.../imagesTr/2637442_AUMC_s001_CT.nii.gz",
-        "label":             "/.../labelsTr/2637442_AUMC_s001_CT.nii.gz",
-        "dist_map":          "/.../distMapsTr/2637442_AUMC_s001_CT.nii.gz",
-        "metrics":           "/.../metricsTr/2637442_AUMC_s001_CT.json",
+        "modality_index":    2,
+        "scan_date":         "2004-10-14",     // ISO date of this scan
+        "file_stem":         "2637442_AUMC_s002_CT",
+        "dicom_session_dir": "/.../02637442/02637442_CT_2",
+        "nifti":             "/.../imagesTr/2637442_AUMC_s002_CT.nii.gz",
+        "label":             "/.../labelsTr/2637442_AUMC_s002_CT.nii.gz",
+        "dist_map":          "/.../distMapsTr/2637442_AUMC_s002_CT.nii.gz",
+        "metrics":           "/.../metricsTr/2637442_AUMC_s002_CT.json",
         "cfd":               null
       },
       "pre_op_other": [
         {
-          "session_id":        "02637442_US_1",   // pre-op US (index 1 = before surgery)
-          "modality":          "US",
-          "modality_index":    1,
-          "file_stem":         "2637442_AUMC_s001_US",
-          "nifti":             "/.../imagesTr/2637442_AUMC_s001_US.nii.gz"
-          // no label / dist_map / metrics / cfd for non-CT modalities
+          "session_id":  "02637442_CT_1",      // earlier pre-op CT
+          "modality":    "CT",
+          "scan_date":   "2003-06-01",
+          ...
+        },
+        {
+          "session_id":  "02637442_US_1",
+          "modality":    "US",
+          "scan_date":   "2004-09-30",
+          ...
         }
       ],
       "post_op": [
         {
-          "session_id":        "HT624_CT_1",
-          "modality":          "CT",
-          "modality_index":    2,
-          ...
-        },
-        {
-          "session_id":        "HT624_US_2",
-          "modality":          "US",
-          "modality_index":    2,
+          "session_id":  "02637442_CT_3",
+          "modality":    "CT",
+          "modality_index": 3,
+          "scan_date":   "2005-04-01",
           ...
         }
+      ],
+      "undated": [
+        // sessions whose scan_date could not be read from DICOM
       ]
     },
-    "pre_op_features":  { ... },   // all Bl_* SPSS columns (unchanged from v1)
-    "post_op_features": { ... },   // all non-Bl_* SPSS columns (unchanged from v1)
-    "ground_truth":     { ... }    // reintervention, death, complications (unchanged)
+    "pre_op_features":  { ... },
+    "post_op_features": { ... },
+    "ground_truth":     { ... }
   }
 }
-
-Backward-compat note
----------------------
-V1: entry["scans"]["pre_op"]["nifti"].
-The training DataLoader should select the pre_op key exclusively for the v1-style model.
 """
 
 import datetime
@@ -82,12 +94,12 @@ import pyreadstat
 
 
 # =========================================================
-# SITE CONFIGURATION  (mirrors v1 SITE_CONFIG)
+# SITE CONFIGURATION
 # =========================================================
 SITE_CONFIG = {
     "AUMC": {
         "spss_site_name": "008 - AmsterdamUMC",
-        "spss_id_format": lambda x: str(int(x)),   # strip leading zeros
+        "spss_id_format": lambda x: str(int(x)),
     },
     "UMCG": {
         "spss_site_name": "009 - UMCG",
@@ -95,20 +107,19 @@ SITE_CONFIG = {
     },
     "MST": {
         "spss_site_name": "007 - Medisch Spectrum Twente (MST)",
-        "spss_id_format": lambda x: str(int(x)),   # strip leading zeros, same as AUMC
+        "spss_id_format": lambda x: str(int(x)),
     },
     "RNST": {
         "spss_site_name": "001 lokatie Arnhem",
-        "spss_id_format": lambda x: str(int(x)).zfill(4),  # RNST IDs are zero-padded to 4 digits in SPSS
+        "spss_id_format": lambda x: str(int(x)).zfill(4),
     },
 }
 
-# Reverse lookup: SPSS site name → site_abbr
 _SITE_NAME_TO_ABBR = {cfg["spss_site_name"]: abbr for abbr, cfg in SITE_CONFIG.items()}
 
 
 # =========================================================
-# SERIALISATION HELPERS  (identical to v1)
+# SERIALISATION HELPERS
 # =========================================================
 
 def serialize_value(val):
@@ -138,6 +149,46 @@ def is_flagged(val) -> bool:
 
 
 # =========================================================
+# DATE HELPERS
+# =========================================================
+
+def _parse_op_date(val) -> datetime.date | None:
+    """Parse P_IP_P_Date from SPSS.
+
+    Handles Python datetime objects (pyreadstat may already parse them) and the
+    string format stored in SPSS: '19-Oct-2004'.
+    """
+    if val is None:
+        return None
+    try:
+        if pd.isna(val):
+            return None
+    except Exception:
+        pass
+    if isinstance(val, datetime.datetime):
+        return val.date()
+    if isinstance(val, datetime.date):
+        return val
+    s = str(val).strip()
+    for fmt in ("%d-%b-%Y", "%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y"):
+        try:
+            return datetime.datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _parse_scan_date(scan_date_str: str | None) -> datetime.date | None:
+    """Parse ISO date string from session index (YYYY-MM-DD)."""
+    if not scan_date_str:
+        return None
+    try:
+        return datetime.date.fromisoformat(scan_date_str)
+    except ValueError:
+        return None
+
+
+# =========================================================
 # PATH BUILDERS
 # =========================================================
 
@@ -149,10 +200,9 @@ def scan_paths(
     derivatives_base: str,
     cfd_src: str | None = None,
 ) -> dict:
-    """Return the standard derivative paths for any imaging scan.
+    """Return standard derivative paths for any imaging scan.
 
     CT-only derivatives (label, dist_map, metrics, cfd) are omitted for non-CT modalities.
-    cfd_src: full path to the renamed source .vtp; cfd destination is set only if it exists.
     """
     stem = f"{spss_id}_{site_abbr}_s{modality_index:03d}_{modality}"
     base = Path(derivatives_base) / "training_subset_v2"
@@ -169,7 +219,7 @@ def scan_paths(
 
 
 # =========================================================
-# GROUND TRUTH EXTRACTION  (identical to v1)
+# GROUND TRUTH EXTRACTION
 # =========================================================
 
 COMP_PATTERNS = {
@@ -189,12 +239,10 @@ COMP_PATTERNS = {
 
 def extract_ground_truth(row, df_columns: list) -> dict:
     """Extract all outcome labels from a SPSS patient row."""
-    # Reintervention
     reint_summary = is_flagged(row.get("ReintervAAArel_0m18m_yn"))
     reint_ae_cols = [c for c in df_columns if re.search(r"AEAction.*answer4", c)]
     has_reint = int(reint_summary or any(is_flagged(row.get(c)) for c in reint_ae_cols))
 
-    # Death
     d_surg  = is_flagged(row.get("Bl_Bl_rAAA_death_surg"))
     d_hosp  = is_flagged(row.get("Bl_Bl_rAAA_deathER"))
     d_ae    = is_flagged(row.get("AE0_AE_AE_Death"))
@@ -202,7 +250,6 @@ def extract_ground_truth(row, df_columns: list) -> dict:
     d_rsn   = any(serialize_value(row.get(c)) == 0 for c in reason_cols)
     has_death = int(d_ae or d_surg or d_hosp or d_rsn)
 
-    # Sac dynamics
     bl_ct_cols = [c for c in df_columns if re.search(r"Bl.*CTA.*AAAdiam", c, re.I)]
     bl_us_cols = [c for c in df_columns if re.search(r"Bl.*(?:US|DUS).*AAAdiam", c, re.I)]
     bl_ct = next((float(row.get(c)) for c in bl_ct_cols if pd.notna(row.get(c))), None)
@@ -282,15 +329,13 @@ def build_multimodal_dataset_v1(
     sav_path : str
         Path to the SPSS .sav clinical database.
     session_index_json : str
-        Output of 01_build_session_index.py.
+        Output of 01_build_session_index.py (must include scan_date per session).
     derivatives_base : str
-        Root under which training_subset_v1/ will live.
+        Root under which training_subset_v2/ will live.
     output_json : str
         Destination for the completed radar_multimodal_config_v1.json.
     cfd_renamed_dir : str | None
         Directory of renamed CFD .vtp files (output of 02_cfd_name_cleaning.py).
-        For each CT scan, the corresponding {folder_id}_{site}_{session_id}.vtp is
-        looked up here; cfd is set to the destination path only if the source exists.
     """
     print(f"Loading SPSS data: {sav_path}")
     df, meta = pyreadstat.read_sav(sav_path)
@@ -303,14 +348,13 @@ def build_multimodal_dataset_v1(
 
     cfd_base = Path(cfd_renamed_dir) if cfd_renamed_dir else None
 
-    # Feature column split (same rule as v1)
     pre_op_cols  = [c for c in df.columns if c.startswith("Bl_") or c in ["PatientNr", "CreatedInSite", "Site", "Height"]]
     post_op_cols = [c for c in df.columns if c not in pre_op_cols and c not in ["PatientNr", "patient_str", "site_str"]]
 
     final_data = {}
-    stats = {"total": 0, "matched": 0, "no_preop_ct": 0, "spss_not_found": 0}
-    spss_not_found_list: list[tuple[str, str]] = []   # (folder_id, site_abbr)
-    no_preop_ct_list:    list[tuple[str, str]] = []   # (spss_id,   site_abbr)
+    stats = {"total": 0, "matched": 0, "no_preop_ct": 0, "spss_not_found": 0, "no_op_date": 0}
+    spss_not_found_list: list[tuple[str, str]] = []
+    no_preop_ct_list:    list[tuple[str, str]] = []
 
     for site_abbr, patients in session_index.items():
         cfg = SITE_CONFIG.get(site_abbr)
@@ -325,13 +369,11 @@ def build_multimodal_dataset_v1(
             stats["total"] += 1
             sessions = patient_info["sessions"]
 
-            # Normalise to SPSS ID
             try:
                 spss_id = id_fmt(folder_id)
             except Exception:
                 spss_id = folder_id
 
-            # Match SPSS row
             mask = (df["patient_str"] == spss_id) & (df["site_str"] == spss_site_name)
             patient_rows = df[mask]
             if patient_rows.empty:
@@ -342,61 +384,119 @@ def build_multimodal_dataset_v1(
 
             row = patient_rows.iloc[0]
 
-            # Separate sessions by timing and modality.
-            # pre_op    → the pre-op CT (primary model input, always index 1).
-            # pre_op_other → other pre-op modalities (US_1, MR_1, …); index 1 but not CT.
-            # post_op   → everything with is_pre_op=False.
-            pre_op_ct_sessions    = [s for s in sessions if s["is_pre_op"] and s["modality"] == "CT"]
-            pre_op_other_sessions = [s for s in sessions if s["is_pre_op"] and s["modality"] != "CT"]
-            post_op_sessions      = [s for s in sessions if not s["is_pre_op"]]
+            # ---- Operation date (hard boundary for pre/post-op) ----
+            op_date = _parse_op_date(row.get("P_IP_P_Date"))
+            op_date_str = op_date.isoformat() if op_date else None
+            if op_date is None:
+                print(f"[WARN] {folder_id} ({site_abbr}): P_IP_P_Date missing or unparseable")
+                stats["no_op_date"] += 1
 
-            if not pre_op_ct_sessions:
-                print(f"[WARN] {folder_id} ({site_abbr}) has no pre-op CT session — included with null pre_op")
+            # ---- Classify sessions by scan_date vs op_date ----
+            pre_op_ct_sessions:    list[dict] = []
+            pre_op_other_sessions: list[dict] = []
+            post_op_sessions:      list[dict] = []
+            undated_sessions:      list[dict] = []
+
+            for s in sessions:
+                scan_dt = _parse_scan_date(s.get("scan_date"))
+
+                if op_date is None or scan_dt is None:
+                    undated_sessions.append(s)
+                    if scan_dt is None:
+                        print(f"[WARN] {folder_id} ({site_abbr}) session {s['session_id']}: no scan_date in DICOM")
+                    continue
+
+                if scan_dt <= op_date:
+                    if s["modality"] == "CT":
+                        pre_op_ct_sessions.append(s)
+                    else:
+                        pre_op_other_sessions.append(s)
+                else:
+                    post_op_sessions.append(s)
+
+            # ---- Pick primary pre-op CT (closest scan date to op_date) ----
+            if pre_op_ct_sessions:
+                pre_op_ct_sessions.sort(
+                    key=lambda s: _parse_scan_date(s.get("scan_date")) or datetime.date.min,
+                    reverse=True,  # descending → first element = highest date = closest to op
+                )
+                primary_pre_op_ct = pre_op_ct_sessions[0]
+                earlier_pre_op_cts = pre_op_ct_sessions[1:]
+            else:
+                primary_pre_op_ct = None
+                earlier_pre_op_cts = []
+
+            # Earlier pre-op CTs join the "other" bucket
+            pre_op_other_sessions = pre_op_other_sessions + earlier_pre_op_cts
+
+            if primary_pre_op_ct is None:
+                session_summary = ", ".join(
+                    f"{s['modality']}@{s.get('scan_date') or 'no-date'}"
+                    for s in sessions
+                )
+                print(
+                    f"[WARN] {folder_id} ({site_abbr}) has no datable pre-op CT — "
+                    f"op_date={op_date_str or 'MISSING'}  sessions=[{session_summary}]"
+                )
                 stats["no_preop_ct"] += 1
                 no_preop_ct_list.append((spss_id, site_abbr))
-                pre_op_entry = None
-            else:
-                ps = pre_op_ct_sessions[0]
-                _cfd_src = str(cfd_base / f"{folder_id}_{site_abbr}_{ps['session_id']}.vtp") if cfd_base else None
-                pre_op_entry = {
-                    "session_id":        ps["session_id"],
-                    "modality":          ps["modality"],
-                    "modality_index":    ps["modality_index"],
-                    "dicom_session_dir": ps["session_dir"],
-                    **scan_paths(spss_id, site_abbr, ps["modality"], ps["modality_index"], derivatives_base, cfd_src=_cfd_src),
-                }
 
+            # ---- Build scan entry dicts ----
             def _make_entry(s: dict) -> dict:
                 _cfd = str(cfd_base / f"{folder_id}_{site_abbr}_{s['session_id']}.vtp") if cfd_base else None
                 return {
                     "session_id":        s["session_id"],
                     "modality":          s["modality"],
                     "modality_index":    s["modality_index"],
+                    "scan_date":         s.get("scan_date"),
                     "dicom_session_dir": s["session_dir"],
                     **scan_paths(spss_id, site_abbr, s["modality"], s["modality_index"], derivatives_base, cfd_src=_cfd),
                 }
 
+            if primary_pre_op_ct is not None:
+                ps = primary_pre_op_ct
+                _cfd_src = str(cfd_base / f"{folder_id}_{site_abbr}_{ps['session_id']}.vtp") if cfd_base else None
+                pre_op_entry = {
+                    "session_id":        ps["session_id"],
+                    "modality":          ps["modality"],
+                    "modality_index":    ps["modality_index"],
+                    "scan_date":         ps.get("scan_date"),
+                    "dicom_session_dir": ps["session_dir"],
+                    **scan_paths(spss_id, site_abbr, ps["modality"], ps["modality_index"], derivatives_base, cfd_src=_cfd_src),
+                }
+            else:
+                pre_op_entry = None
+
             pre_op_other_entries = [_make_entry(s) for s in sorted(
-                pre_op_other_sessions, key=lambda s: (s["modality"], s["modality_index"])
+                pre_op_other_sessions, key=lambda s: (s["modality"], s.get("scan_date") or "", s["session_id"])
             )]
 
+            # Post-op: sort by scan_date ascending, then CT first within same date
+            post_op_sessions.sort(key=lambda s: (
+                s.get("scan_date") or "",
+                s["modality"] != "CT",
+                s["modality"],
+                s["session_id"],
+            ))
             post_op_entries = [_make_entry(s) for s in post_op_sessions]
-            # Sort post-op: CT first (by modality_index), then other modalities alphabetically
-            post_op_entries.sort(key=lambda x: (x["modality"] != "CT", x["modality"], x["modality_index"]))
+
+            undated_entries = [_make_entry(s) for s in undated_sessions]
 
             unique_key = f"{spss_id}_{site_abbr}"
             final_data[unique_key] = {
                 "metadata": {
-                    "id":         spss_id,
+                    "id":          spss_id,
                     "original_nr": serialize_value(row["PatientNr"]),
                     "site":        spss_site_name,
                     "site_short":  site_abbr,
                     "folder_id":   folder_id,
+                    "op_date":     op_date_str,
                 },
                 "scans": {
                     "pre_op":       pre_op_entry,
                     "pre_op_other": pre_op_other_entries,
                     "post_op":      post_op_entries,
+                    "undated":      undated_entries,
                 },
                 "pre_op_features":  {k: serialize_value(row[k]) for k in pre_op_cols  if k in row},
                 "post_op_features": {k: serialize_value(row[k]) for k in post_op_cols if k in row},
@@ -404,7 +504,6 @@ def build_multimodal_dataset_v1(
             }
             stats["matched"] += 1
 
-    # Save
     Path(output_json).parent.mkdir(parents=True, exist_ok=True)
     with open(output_json, "w") as f:
         json.dump(final_data, f, indent=4)
@@ -432,14 +531,13 @@ def _print_analysis_report(
     def fprint(s=""):
         report_lines.append(str(s))
 
-    # Per-site grouping
     site_data: dict[str, list] = defaultdict(list)
     for p in final_data.values():
         site_data[p["metadata"]["site_short"]].append(p)
     sites = sorted(site_data.keys())
 
     total_n = len(final_data)
-    MW, CW = 38, 16  # metric / column widths — MW matches v1
+    MW, CW = 38, 16
 
     def fmt_cell(count, denom, note=""):
         if denom == 0:
@@ -460,9 +558,9 @@ def _print_analysis_report(
     rprint(f"  Patients in session index : {stats['total']}")
     rprint(f"  Matched to SPSS           : {stats['matched']}")
     rprint(f"  Not found in SPSS         : {stats['spss_not_found']}")
+    rprint(f"  Missing op date           : {stats['no_op_date']}")
     rprint(f"  Missing pre-op CT         : {stats['no_preop_ct']}")
 
-    # ---- Scan coverage ----
     rprint("\nSCAN COVERAGE")
     rprint(sep)
     rprint(header)
@@ -477,6 +575,7 @@ def _print_analysis_report(
         ("Has post-op US",   lambda p: any(s["modality"] == "US"  for s in p["scans"].get("post_op", []))),
         ("Has post-op MR",   lambda p: any(s["modality"] == "MR"  for s in p["scans"].get("post_op", []))),
         ("Has post-op XR",   lambda p: any(s["modality"] == "XR"  for s in p["scans"].get("post_op", []))),
+        ("Has undated scans",lambda p: bool(p["scans"].get("undated"))),
     ]
     for label, fn in cov_metrics:
         row  = f"{label:{MW}} | {fmt_cell(sum(1 for p in final_data.values() if fn(p)), total_n)}"
@@ -487,7 +586,6 @@ def _print_analysis_report(
         rprint(row)
     rprint(sep)
 
-    # ---- Ground truth ----
     GT_METRICS = [
         "endoleak_1a", "endoleak_1b", "endoleak_2", "endoleak_3", "endoleak_5",
         "occlusion", "stenosis", "kinking", "fracture", "migration", "infection",
@@ -519,10 +617,9 @@ def _print_analysis_report(
             row += f" | {fmt_cell(s_count, s_denom, note)}"
         rprint(row)
 
-    # Data-quality rows below the GT block (same section, separated)
     rprint(sep)
     for dq_label, dq_fn in [
-        ("no_baseline_diam",       lambda p: not p["ground_truth"].get("has_baseline_diam", True)),
+        ("no_baseline_diam",        lambda p: not p["ground_truth"].get("has_baseline_diam", True)),
         ("no_fu_diam (bl present)", lambda p: p["ground_truth"].get("has_baseline_diam") and
                                               not p["ground_truth"].get("has_fu_diam", True)),
     ]:
@@ -537,12 +634,10 @@ def _print_analysis_report(
     rprint("* sac_regression / sac_stable / sac_expansion are % of sac_measured, not total")
     rprint("=" * sep_len)
 
-    # ---- Patient-ID detail: txt only ----
     fprint("\n" + "=" * sep_len)
     fprint("DATA QUALITY DETAIL — PATIENT IDs")
     fprint("=" * sep_len)
 
-    # Not found in SPSS
     nf_by_site: dict[str, list] = defaultdict(list)
     for fid, site in spss_not_found:
         nf_by_site[site].append(fid)
@@ -552,7 +647,6 @@ def _print_analysis_report(
     if not spss_not_found:
         fprint("  (none)")
 
-    # Missing pre-op CT
     nc_by_site: dict[str, list] = defaultdict(list)
     for sid, site in no_preop_ct:
         nc_by_site[site].append(sid)
@@ -562,7 +656,6 @@ def _print_analysis_report(
     if not no_preop_ct:
         fprint("  (none)")
 
-    # Missing baseline diameter
     bl_missing = [(k, p["metadata"]["site_short"]) for k, p in final_data.items()
                   if not p["ground_truth"].get("has_baseline_diam", True)]
     bl_by_site: dict[str, list] = defaultdict(list)
@@ -574,7 +667,6 @@ def _print_analysis_report(
     if not bl_missing:
         fprint("  (none)")
 
-    # Missing FU diameter (baseline present)
     fu_missing = [(k, p["metadata"]["site_short"]) for k, p in final_data.items()
                   if p["ground_truth"].get("has_baseline_diam") and
                   not p["ground_truth"].get("has_fu_diam", True)]
@@ -587,7 +679,6 @@ def _print_analysis_report(
     if not fu_missing:
         fprint("  (none)")
 
-    # Post-op images but no pre-op CT
     postop_no_preop = [
         (k, p["metadata"]["site_short"]) for k, p in final_data.items()
         if p["scans"]["pre_op"] is None and p["scans"].get("post_op")
@@ -601,37 +692,73 @@ def _print_analysis_report(
     if not postop_no_preop:
         fprint("  (none)")
 
+    # Undated scans detail
+    undated_patients = [
+        (k, p["metadata"]["site_short"], len(p["scans"].get("undated", [])))
+        for k, p in final_data.items()
+        if p["scans"].get("undated")
+    ]
+    fprint(f"\nPatients with undated sessions (no scan_date from DICOM) — {len(undated_patients)}")
+    for key, site, n in sorted(undated_patients):
+        fprint(f"  {key} ({site}): {n} undated session(s)")
+    if not undated_patients:
+        fprint("  (none)")
+
     fprint("=" * sep_len)
 
-    # ---- Per-patient scan table: txt only ----
+    fprint("\n" + "=" * sep_len)
+    fprint("GROUND TRUTH METRIC DETAIL — PATIENT IDs")
+    fprint("=" * sep_len)
+
+    gt_detail_metrics = [m for m in GT_METRICS if not m.startswith("death")]
+    for metric in gt_detail_metrics:
+        positive = [
+            (k, p["metadata"]["site_short"])
+            for k, p in final_data.items()
+            if p["ground_truth"].get(metric) == 1
+        ]
+        by_site: dict[str, list] = defaultdict(list)
+        for key, site in positive:
+            by_site[site].append(key)
+        fprint(f"\n{metric} — {len(positive)} patient(s)")
+        for site, pids in sorted(by_site.items()):
+            fprint(f"  {site} ({len(pids)}): {', '.join(sorted(pids))}")
+        if not positive:
+            fprint("  (none)")
+
+    fprint("=" * sep_len)
+
     fprint("\n" + "=" * sep_len)
     fprint("PER-PATIENT SCAN DETAIL")
     fprint("=" * sep_len)
     fprint(
-        f"{'Patient Key':<25} {'PreCT':<6} {'CFD':<5} {'PreOth':<12}"
-        f" {'FU-CT':<7} {'FU-US':<7} {'FU-MR':<7} {'FU-XR':<7} Other"
+        f"{'Patient Key':<25} {'op_date':<12} {'PreCT':<6} {'CFD':<5} {'PreOth':<12}"
+        f" {'FU-CT':<7} {'FU-US':<7} {'FU-MR':<7} {'FU-XR':<7} {'Undated':<7} Other"
     )
-    fprint("-" * 95)
+    fprint("-" * 105)
     for key, p in sorted(final_data.items()):
         scans   = p["scans"]
         pre_op  = scans.get("pre_op")
         po      = scans.get("post_op", [])
         poo     = scans.get("pre_op_other", [])
+        und     = scans.get("undated", [])
         fu_mods = Counter(s["modality"] for s in po)
         pre_oth = Counter(s["modality"] for s in poo)
         pre_oth_str = ",".join(f"{m}:{n}" for m, n in sorted(pre_oth.items())) or "-"
+        op_d = p["metadata"].get("op_date") or "-"
         fprint(
             f"  {key:<23}"
+            f" {op_d:<12}"
             f" {'YES' if pre_op else 'NO':<6}"
             f" {'YES' if (pre_op and pre_op.get('cfd')) else 'NO':<5}"
             f" {pre_oth_str:<12}"
             f" {fu_mods.get('CT', 0):<7} {fu_mods.get('US', 0):<7}"
             f" {fu_mods.get('MR', 0):<7} {fu_mods.get('XR', 0):<7}"
+            f" {len(und):<7}"
             f" {sum(v for k, v in fu_mods.items() if k not in ('CT', 'US', 'MR', 'XR'))}"
         )
     fprint("=" * sep_len)
 
-    # Save
     analysis_txt = output_json.rsplit(".json", 1)[0] + "_analysis.txt"
     with open(analysis_txt, "w") as f:
         f.write("\n".join(report_lines) + "\n")

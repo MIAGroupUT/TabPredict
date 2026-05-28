@@ -352,14 +352,20 @@ def run_pipeline(cfg: dict) -> None:
         model = nn.DataParallel(model)
 
     # ── loss ──────────────────────────────────────────────────────────────────
-    _focal_gamma = cfg["training"].get("focal_gamma", 2.0)
+    _focal_gamma  = cfg["training"].get("focal_gamma", 2.0)
     _label_smooth = cfg["training"].get("label_smoothing", 0.02)
     _pos_weight   = cfg["training"].get("pos_weight", 1.0)
     if with_comp:
+        _clw_cfg = cfg["training"].get("comp_loss_weights", {})
+        _cpw_cfg = cfg["training"].get("comp_pos_weights",  {})
+        comp_loss_weights = [_clw_cfg.get(c, 1.0) for c in complications] if _clw_cfg else None
+        comp_pos_weights  = [_cpw_cfg.get(c, 1.0) for c in complications] if _cpw_cfg else None
         criterion = MultiTaskReinterventionLoss(
             focal_gamma=_focal_gamma,
             label_smoothing=_label_smooth,
             pos_weight_reint=_pos_weight,
+            comp_loss_weights=comp_loss_weights,
+            comp_pos_weights=comp_pos_weights,
             device=DEVICE,
         )
     else:
@@ -406,7 +412,7 @@ def run_pipeline(cfg: dict) -> None:
         best_val_auc     = 0.0
         patience_counter = 0
         gate_l1_w        = cfg["training"].get("gate_l1_weight", 1e-3)
-        apply_dropout    = (st != "A")
+        apply_dropout    = True  # both stages; Stage A needs it to prevent clinical memorisation
 
         for epoch in range(stage_cfg["epochs"]):
             model.train()

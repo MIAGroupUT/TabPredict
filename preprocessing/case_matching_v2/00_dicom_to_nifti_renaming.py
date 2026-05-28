@@ -61,6 +61,16 @@ _DICOM_MODALITY_MAP = {
     "PT": "PET",   # DICOM standard tag for PET; use PET in filenames/index
 }
 
+# Imaging modalities we want to convert.  Anything not in this set is ignored —
+# safer than a denylist since the DICOM standard has dozens of non-image types
+# (SR, KO, PR, REG, RTSTRUCT, …) and new ones are added over time.
+#   CT   — computed tomography (also the CT component of PET-CT)
+#   MR   — magnetic resonance imaging
+#   PET  — positron emission tomography (raw DICOM tag PT, mapped above)
+#   XR   — plain X-ray (raw tags CR / DX, both mapped above)
+#   US   — ultrasound
+_IMAGE_MODALITIES = {"CT", "MR", "PET", "XR", "US"}
+
 
 # =========================================================
 # HELPERS
@@ -162,17 +172,17 @@ def find_best_dicom_dir(session_dir: Path, modality: str) -> Path | None:
     """
     candidates = []
     try:
-        dicom_dirs = [
-            d for d in session_dir.rglob("files")
-            if d.is_dir() and d.parent.name == "DICOM"
-        ]
+        dicom_dirs = sorted(
+            (d for d in session_dir.rglob("files") if d.is_dir() and d.parent.name == "DICOM"),
+            key=lambda p: str(p),
+        )
     except (PermissionError, OSError) as e:
         print(f"    [!]  Cannot walk {session_dir}: {e}")
         return None
 
     for dicom_dir in dicom_dirs:
         series_modality = read_dicom_modality(dicom_dir)
-        if series_modality != modality:
+        if series_modality not in _IMAGE_MODALITIES or series_modality != modality:
             continue
 
         if modality == "CT":
@@ -194,14 +204,17 @@ def find_best_dicom_dir(session_dir: Path, modality: str) -> Path | None:
 
 
 def _enumerate_modalities(session_dir: Path) -> list[str]:
-    """Return sorted list of distinct modalities found in a session directory."""
+    """Return sorted list of distinct image modalities found in a session directory.
+
+    Non-image series (SR, KO, etc.) are excluded.
+    """
     seen: set[str] = set()
     try:
         for dicom_dir in session_dir.rglob("files"):
             if not (dicom_dir.is_dir() and dicom_dir.parent.name == "DICOM"):
                 continue
             mod = read_dicom_modality(dicom_dir)
-            if mod != "UNKNOWN":
+            if mod in _IMAGE_MODALITIES:
                 seen.add(mod)
     except (PermissionError, OSError):
         pass
@@ -218,34 +231,27 @@ def convert_to_nifti(dicom_dir: Path) -> sitk.Image | None:
 
 
 def session_modality(session_id: str, site_abbr: str, session_dir: Path) -> str:
-    """
-    Determine the imaging modality for a layered-session (AUMC/UMCG) site.
-    Not called for flat-session sites (MST/RNST) — those use _enumerate_modalities().
+    """Determine the imaging modality for a layered-session (AUMC/UMCG) site.
 
-    AUMC: parse from session name suffix (_CT_, _US_, _XR_/_CR_, _MR_)
-    UMCG: read from DICOM Modality tag (session names are purely numeric)
+    DICOM Modality tag is always the primary source — authoritative and robust across
+    sites.  Session name parsing is a fallback for AUMC only, used when DICOM files
+    are unreadable.
+    Not called for flat-session sites (MST/RNST) — those use _enumerate_modalities().
     """
+    dicom_dirs = sorted(
+        (d for d in session_dir.rglob("files") if d.is_dir() and d.parent.name == "DICOM"),
+        key=lambda p: str(p),
+    )
+    for dicom_dir in dicom_dirs:
+        mod = read_dicom_modality(dicom_dir)
+        if mod in _IMAGE_MODALITIES:
+            return mod
+    # Fallback: parse from AUMC session name if DICOM is unreadable
     if site_abbr == "AUMC":
         m = _AUMC_SESSION_RE.match(session_id)
         if m:
             raw = m.group(1)
-            return _DICOM_MODALITY_MAP.get(raw, raw)  # CR/DX → XR
-        return "UNKNOWN"
-
-    if site_abbr == "UMCG":
-        for dicom_dir in session_dir.rglob("files"):
-            if dicom_dir.is_dir() and dicom_dir.parent.name == "DICOM":
-                return read_dicom_modality(dicom_dir)
-        return "UNKNOWN"
-
-    # Fallback for any future layered-session site
-    m = _AUMC_SESSION_RE.match(session_id)
-    if m:
-        raw = m.group(1)
-        return _DICOM_MODALITY_MAP.get(raw, raw)
-    for dicom_dir in session_dir.rglob("files"):
-        if dicom_dir.is_dir() and dicom_dir.parent.name == "DICOM":
-            return read_dicom_modality(dicom_dir)
+            return _DICOM_MODALITY_MAP.get(raw, raw)
     return "UNKNOWN"
 
 

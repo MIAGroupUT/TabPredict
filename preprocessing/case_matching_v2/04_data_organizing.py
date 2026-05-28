@@ -7,11 +7,11 @@ imagesTr_all/ into the structured training_subset_v1/ directories, using the
 standardised file stems defined in the config.
 
 Handles all modalities:
-  - pre-op CT  → training_subset_v1/imagesTr/{spss_id}_{site}_s001_CT.nii.gz
+  - pre-op CT   → training_subset_v1/imagesTr/{spss_id}_{site}_s001_CT.nii.gz
   - post-op CTs → training_subset_v1/imagesTr/{spss_id}_{site}_s002_CT.nii.gz, …
-  - US scans   → training_subset_v1/imagesTr/{spss_id}_{site}_s001_US.nii.gz, …
-  - MR scans   → training_subset_v1/imagesTr/{spss_id}_{site}_s001_MR.nii.gz, …
-  - XR scans   → training_subset_v1/imagesTr/{spss_id}_{site}_s001_XR.nii.gz, …
+  - US scans    → training_subset_v1/imagesTr/{spss_id}_{site}_s001_US.nii.gz, …
+  - MR scans    → training_subset_v1/imagesTr/{spss_id}_{site}_s001_MR.nii.gz, …
+  - XR scans    → training_subset_v1/imagesTr/{spss_id}_{site}_s001_XR.nii.gz, …
 
 Source naming (output of 00_dicom_to_nifti_renaming.py)
 -------------------------------------------------
@@ -24,7 +24,7 @@ from pathlib import Path
 
 
 def scan_entries(patient_record: dict) -> list[dict]:
-    """Return all scan entries for a patient: pre_op CT, pre_op_other, and post_op."""
+    """Return all scan entries for a patient across all timing buckets."""
     scans = patient_record["scans"]
     entries = []
     if scans.get("pre_op") is not None:
@@ -32,6 +32,8 @@ def scan_entries(patient_record: dict) -> list[dict]:
     for s in scans.get("pre_op_other", []):
         entries.append(s)
     for s in scans.get("post_op", []):
+        entries.append(s)
+    for s in scans.get("undated", []):
         entries.append(s)
     return entries
 

@@ -1,13 +1,17 @@
 #!/bin/bash
-#SBATCH -c 12
+#SBATCH -c 36
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:0
-#SBATCH --mem=32G
+#SBATCH --mem=64G
 #SBATCH --time=180:00:00
-#SBATCH --partition=mia,mia-pof,am,main
-#SBATCH --output=/home/ranema/AI4EVAR/logs/%x_%j.log
-#SBATCH --error=/home/ranema/AI4EVAR/logs/%x_%j.err
+#SBATCH --partition=mia,mia-pof,am
+#SBATCH --output=/home/ranema/AI4EVAR/logs/00_dicom_to_nifti_renaming_V1.log
+#SBATCH --error=/home/ranema/AI4EVAR/logs/00_dicom_to_nifti_renaming_V1.err
 #SBATCH --job-name=prepare_data
+
+#--output=/home/ranema/AI4EVAR/logs/%x_%j.log
+#--error=/home/ranema/AI4EVAR/logs/%x_%j.err
+
 
 # -------------------------
 # Load environment
@@ -33,10 +37,10 @@ source activate ai4evar
 # -------------------------
 # Run data preparation pipeline
 # -------------------------
-# srun -u $HOME/.conda/envs/ai4evar/bin/python -m 00_dicom_to_nifti_renaming 
-# srun -u $HOME/.conda/envs/ai4evar/bin/python -m 01_build_session_index 
+srun -u $HOME/.conda/envs/ai4evar/bin/python -m 00_dicom_to_nifti_renaming 
+# srun -u $HOME/.conda/envs/ai4evar/bin/python -m 01_build_session_index
 # srun -u $HOME/.conda/envs/ai4evar/bin/python -m 02_cfd_name_cleaning 
-srun -u $HOME/.conda/envs/ai4evar/bin/python -m 03_data_matching_v1
+# srun -u $HOME/.conda/envs/ai4evar/bin/python -m 03_data_matching_v1
 # srun -u $HOME/.conda/envs/ai4evar/bin/python -m 04_data_organizing 
 # srun -u $HOME/.conda/envs/ai4evar/bin/python -m 05_nnUNet_labels_metrics_generation \
 #     --input "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1/imagesTr" \

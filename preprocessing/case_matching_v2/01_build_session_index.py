@@ -3,7 +3,7 @@
 ==========================================================================================
 
 Walks data/ and produces a JSON index of every imaging session per patient,
-with modality, scan index, pre-op flag, and directory paths.
+with modality, scan date, and directory paths.
 
 Two XNAT session layouts are handled:
 
@@ -32,11 +32,11 @@ Session index structure
       "patient_dir": "/deepstore/.../02637442",
       "sessions": [
         {
-          "session_id":    "02637442_CT_1",
-          "modality":      "CT",
-          "modality_index": 1,
-          "is_pre_op":     true,
-          "session_dir":   "/deepstore/.../02637442/02637442_CT_1"
+          "session_id":     "02637442_CT_1",
+          "modality":       "CT",
+          "modality_index":  1,
+          "scan_date":      "2018-04-23",   // ISO date from DICOM StudyDate; null if unreadable
+          "session_dir":    "/deepstore/.../02637442/02637442_CT_1"
         },
         ...
       ]
@@ -47,28 +47,29 @@ Session index structure
       "patient_dir": "/deepstore/.../0",
       "sessions": [
         {
-          "session_id":    "0_CT_1",      // synthetic
-          "modality":      "CT",
-          "modality_index": 1,
-          "is_pre_op":     true,
-          "session_dir":   "/deepstore/.../0/0"
+          "session_id":     "0_CT_1",
+          "modality":       "CT",
+          "modality_index":  1,
+          "scan_date":      "2005-03-14",
+          "session_dir":    "/deepstore/.../0/0"
         }
       ]
     }
   }
 }
 
-Pre-op detection rules
-----------------------
-AUMC:     session whose xnat_id prefix equals the patient folder name AND local index == 1.
-MST/RNST: all sessions are pre-op (datasets contain pre-op data only).
-UMCG:     scan index == 1 (any modality); index embedded in the numeric session ID.
+Scan date extraction
+--------------------
+StudyDate (0008,0020) is read from the first DICOM file in each session and stored as
+"scan_date" (ISO YYYY-MM-DD, or null if unreadable).  Pre-op / post-op classification is
+deferred to 03_data_matching_v1.py, which compares scan_date against P_IP_P_Date (implant-
+procedure date) from SPSS.
 
 Modality index assignment
 -------------------------
-For CT: pre-op always receives modality_index=1; post-op CTs follow in sorted order.
-For all other modalities: sorted alphabetically by session_id, starting from 1.
-UMCG: the raw numeric suffix is used as-is (encodes chronological visit order).
+Sessions are sorted chronologically by scan_date (nulls last, then by session_id) before
+indices are assigned; index 1 = earliest scan for that modality.
+UMCG: the raw numeric suffix in the session_id is used as-is (encodes visit order).
 """
 
 import json
@@ -85,101 +86,96 @@ import pydicom
 SITE_MAP = {
     "ARTinEVAR-AUMC_data": "AUMC",
     "ARTinEVAR-UMCG_data": "UMCG",
-    "ARTinEVAR-MST_data":  "MST",   # pre-op only; flat-session layout
-    "ARTinEVAR_data":      "RNST",  # pre-op only; flat-session layout
+    "ARTinEVAR-MST_data":  "MST",   # flat-session layout
+    "ARTinEVAR_data":      "RNST",  # flat-session layout
 }
 
-# Sites that store all modalities as series inside a single session dir
 _FLAT_SESSION_SITES = {"MST", "RNST"}
 
 _AUMC_SESSION_RE = re.compile(r'^.+_([A-Z]{2,3})_(\d+)$')
 
-# DICOM Modality tag → pipeline label.
-# CR and DX are both plain X-rays; some sites use _XR_ in session names, others _CR_.
 _DICOM_MODALITY_MAP = {
     "CR": "XR",
     "DX": "XR",
-    "PT": "PET",   # DICOM standard tag for PET; use PET in filenames/index
+    "PT": "PET",
 }
 
+# Imaging modalities we want to index.  Anything not in this set is ignored —
+# safer than a denylist since the DICOM standard has dozens of non-image types
+# (SR, KO, PR, REG, RTSTRUCT, …) and new ones are added over time.
+#   CT   — computed tomography (also the CT component of PET-CT)
+#   MR   — magnetic resonance imaging
+#   PET  — positron emission tomography (raw DICOM tag PT, mapped above)
+#   XR   — plain X-ray (raw tags CR / DX, both mapped above)
+#   US   — ultrasound
+_IMAGE_MODALITIES = {"CT", "MR", "PET", "XR", "US"}
+
 
 # =========================================================
-# MODALITY DETECTION
+# DICOM TAG READING
 # =========================================================
 
-def _modality_from_dicom_dir(dicom_dir: Path) -> str:
-    """Read normalised modality from a specific DICOM directory (no recursion)."""
+def _read_first_dicom_tags(dicom_dir: Path) -> tuple[str, str | None]:
+    """Return (modality, scan_date) from the first readable DICOM file in dicom_dir.
+
+    scan_date is ISO YYYY-MM-DD from StudyDate (0008,0020), or None if unavailable.
+    """
     for f in dicom_dir.rglob("*"):
         if not f.is_file():
             continue
         try:
             ds = pydicom.dcmread(str(f), stop_before_pixels=True)
-            raw = str(getattr(ds, "Modality", "UNKNOWN")).upper()
-            return _DICOM_MODALITY_MAP.get(raw, raw)
+            raw_mod = str(getattr(ds, "Modality", "UNKNOWN")).upper()
+            modality = _DICOM_MODALITY_MAP.get(raw_mod, raw_mod)
+            raw_date = str(getattr(ds, "StudyDate", "") or "").strip()
+            scan_date = (
+                f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:8]}"
+                if len(raw_date) == 8 else None
+            )
+            return modality, scan_date
         except Exception:
             continue
-    return "UNKNOWN"
+    return "UNKNOWN", None
 
 
-def read_dicom_modality(session_dir: Path) -> str:
-    """Read normalised modality by searching recursively for DICOM dirs in session_dir."""
+def read_dicom_tags(session_dir: Path) -> tuple[str, str | None]:
+    """Search session_dir recursively for DICOM dirs; return (modality, scan_date).
+
+    Non-image series (SR dose reports, KO, etc.) are skipped so that a CT session
+    containing an embedded SR series is still labelled as CT.
+    """
     try:
-        dicom_dirs = [
-            d for d in session_dir.rglob("files")
-            if d.is_dir() and d.parent.name == "DICOM"
-        ]
+        dicom_dirs = sorted(
+            (d for d in session_dir.rglob("files") if d.is_dir() and d.parent.name == "DICOM"),
+            key=lambda p: str(p),
+        )
     except (PermissionError, OSError):
-        return "UNKNOWN"
+        return "UNKNOWN", None
 
     for dicom_dir in dicom_dirs:
-        mod = _modality_from_dicom_dir(dicom_dir)
-        if mod != "UNKNOWN":
-            return mod
-    return "UNKNOWN"
+        mod, scan_date = _read_first_dicom_tags(dicom_dir)
+        if mod in _IMAGE_MODALITIES:
+            return mod, scan_date
+    return "UNKNOWN", None
 
 
-def get_session_modality(session_id: str, site_abbr: str, session_dir: Path) -> str:
+def get_session_modality(session_id: str, site_abbr: str, session_dir: Path) -> tuple[str, str | None]:
+    """Return (modality, scan_date) for a layered-session site (AUMC/UMCG).
+
+    DICOM tags are always the primary source — the Modality tag is authoritative and
+    robust across sites.  Session name parsing is a fallback for AUMC only, used when
+    DICOM files are unreadable (e.g. permission error or corrupt archive).
     """
-    Determine modality for a layered-session (AUMC/UMCG) site.
-    Not called for flat-session sites — those use _build_sessions_flat().
-    """
+    mod, scan_date = read_dicom_tags(session_dir)
+    if mod in _IMAGE_MODALITIES:
+        return mod, scan_date
+    # Fallback: parse modality from AUMC session name if DICOM is unreadable
     if site_abbr == "AUMC":
         m = _AUMC_SESSION_RE.match(session_id)
         if m:
             raw = m.group(1)
-            return _DICOM_MODALITY_MAP.get(raw, raw)  # CR/DX → XR
-    # UMCG (numeric session IDs) and fallback: read modality from DICOM tag
-    return read_dicom_modality(session_dir)
-
-
-# =========================================================
-# PRE-OP DETECTION
-# =========================================================
-
-def is_preop_session(session_id: str, modality: str, patient_id: str, site_abbr: str) -> bool:
-    """
-    Return True if this session is pre-operative.
-    Only called for layered-session sites (AUMC, UMCG).
-
-    AUMC: xnat_id prefix == patient folder name AND local index == 1 (any modality).
-    UMCG: scan index == 1 (any modality); index is embedded in the numeric session ID.
-    MST/RNST: handled in _build_sessions_flat() — all are pre-op by definition.
-    """
-    if site_abbr == "AUMC":
-        m = _AUMC_SESSION_RE.match(session_id)
-        if m:
-            suffix_len = len(m.group(1)) + len(m.group(2)) + 2
-            prefix = session_id[:-suffix_len]
-            local_index = m.group(2)
-            return prefix == patient_id and local_index == "1"
-        return False
-
-    if site_abbr == "UMCG":
-        # session_id = base_id + scan_index (all digits); index 1 is pre-op for any modality
-        if session_id.startswith(patient_id) and session_id[len(patient_id):].isdigit():
-            return session_id[len(patient_id):] == "1"
-
-    return False
+            return _DICOM_MODALITY_MAP.get(raw, raw), None
+    return "UNKNOWN", None
 
 
 # =========================================================
@@ -189,10 +185,9 @@ def is_preop_session(session_id: str, modality: str, patient_id: str, site_abbr:
 def _build_sessions_flat(patient_dir: Path, patient_id: str) -> list[dict]:
     """
     For flat-session sites (MST, RNST): the patient folder contains a single session
-    subdirectory (named after the patient ID) that holds all modalities as series.
-    Returns one synthetic session entry per distinct modality found.
-
-    Synthetic session_id follows the AUMC convention: {patient_id}_{modality}_1
+    directory holding all modalities as series.
+    Returns one entry per distinct modality, with scan_date from DICOM StudyDate.
+    Synthetic session_id follows {patient_id}_{modality}_1.
     """
     session_dir = patient_dir / patient_id
     if not session_dir.is_dir():
@@ -212,14 +207,14 @@ def _build_sessions_flat(patient_dir: Path, patient_id: str) -> list[dict]:
         return []
 
     for dicom_dir in dicom_dirs:
-        mod = _modality_from_dicom_dir(dicom_dir)
-        if mod == "UNKNOWN" or mod in seen:
+        mod, scan_date = _read_first_dicom_tags(dicom_dir)
+        if mod not in _IMAGE_MODALITIES or mod in seen:
             continue
         seen.add(mod)
         sessions.append({
             "session_id":  f"{patient_id}_{mod}_1",
             "modality":    mod,
-            "is_pre_op":   True,
+            "scan_date":   scan_date,
             "session_dir": str(session_dir),
         })
 
@@ -231,9 +226,7 @@ def _build_sessions_flat(patient_dir: Path, patient_id: str) -> list[dict]:
 # =========================================================
 
 def build_session_index(DATA_ROOT: str) -> dict:
-    """
-    Walk data/ and return a nested dict with all per-patient session metadata.
-    """
+    """Walk data/ and return a nested dict with all per-patient session metadata."""
     root = Path(DATA_ROOT)
     index = {}
 
@@ -267,38 +260,40 @@ def build_session_index(DATA_ROOT: str) -> dict:
                     if not session_dir.is_dir():
                         continue
                     session_id = session_dir.name
-                    modality   = get_session_modality(session_id, site_abbr, session_dir)
-                    preop      = is_preop_session(session_id, modality, patient_id, site_abbr)
+                    modality, scan_date = get_session_modality(session_id, site_abbr, session_dir)
+                    if modality not in _IMAGE_MODALITIES:
+                        continue
                     sessions_raw.append({
                         "session_id":  session_id,
                         "modality":    modality,
-                        "is_pre_op":   preop,
+                        "scan_date":   scan_date,
                         "session_dir": str(session_dir),
                     })
 
-            # ---- Assign modality_index ----
-            # UMCG: raw scan number stripped from session_id (e.g. "3843" → 3 for patient "384").
-            # All others: sequential per-modality counter; CT pre-op always gets index 1.
+            # ---- Assign modality_index chronologically by scan_date ----
             modality_groups: dict = defaultdict(list)
             for s in sessions_raw:
                 modality_groups[s["modality"]].append(s)
 
             for mod, mod_sessions in modality_groups.items():
-                if mod == "CT":
-                    preop_list  = [s for s in mod_sessions if s["is_pre_op"]]
-                    postop_list = sorted(
-                        [s for s in mod_sessions if not s["is_pre_op"]],
-                        key=lambda s: s["session_id"],
-                    )
-                    ordered = preop_list + postop_list
-                else:
-                    ordered = sorted(mod_sessions, key=lambda s: s["session_id"])
-
-                for i, s in enumerate(ordered):
-                    if site_abbr == "UMCG":
+                if site_abbr == "UMCG":
+                    # UMCG raw numeric suffix encodes visit order directly
+                    for s in mod_sessions:
                         raw_idx = s["session_id"][len(patient_id):]
-                        s["modality_index"] = int(raw_idx) if raw_idx.isdigit() else i + 1
-                    else:
+                        s["modality_index"] = int(raw_idx) if raw_idx.isdigit() else None
+                    # Sequential fallback for any unresolved indices
+                    max_idx = max(
+                        (s["modality_index"] for s in mod_sessions if s["modality_index"] is not None),
+                        default=0,
+                    )
+                    for i, s in enumerate(s for s in mod_sessions if s["modality_index"] is None):
+                        s["modality_index"] = max_idx + i + 1
+                else:
+                    ordered = sorted(
+                        mod_sessions,
+                        key=lambda s: (s.get("scan_date") is None, s.get("scan_date") or "", s["session_id"]),
+                    )
+                    for i, s in enumerate(ordered):
                         s["modality_index"] = i + 1
 
             site_index[patient_id] = {
@@ -317,7 +312,10 @@ def build_session_index(DATA_ROOT: str) -> dict:
 # =========================================================
 if __name__ == "__main__":
     DATA_ROOT   = "/deepstore/datasets/mia/AI4EVAR/raw_data/RADAR_XNat/data"
-    OUTPUT_JSON = "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v2/clinical_data/session_index_v1.json"
+    OUTPUT_JSON = (
+        "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v2/"
+        "clinical_data/session_index_v1.json"
+    )
 
     index = build_session_index(DATA_ROOT)
 

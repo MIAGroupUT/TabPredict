@@ -34,6 +34,7 @@ var/
 # Claude related stuff
 CLAUDE.md
 .claude/
+graphify-out
 
 # Data and Models (NEVER commit patient data)
 data/raw/

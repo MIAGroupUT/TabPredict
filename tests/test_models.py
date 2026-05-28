@@ -216,38 +216,38 @@ def test_load_checkpoint_strict_raises_on_missing(tmp_path, fresh_model_no_comp)
         load_checkpoint(fresh_model_no_comp, str(ckpt_path), device="cpu", strict=True)
 
 
-# ── FiLM clamp (±0.3) ────────────────────────────────────────────────────────
-# _film(): x * (1 + tanh(γ) * 0.3) + tanh(β) * 0.3
-# tanh saturates to ±1, so the multiplicative scale stays in [0.7, 1.3]
-# and the additive shift stays in [-0.3, 0.3].
+# ── FiLM clamp (±0.15) ───────────────────────────────────────────────────────
+# _film(): x * (1 + tanh(γ) * 0.15) + tanh(β) * 0.15
+# tanh saturates to ±1, so the multiplicative scale stays in [0.85, 1.15]
+# and the additive shift stays in [-0.15, 0.15].
 
 
 def test_film_multiplicative_scale_clamped(fresh_model_no_comp):
-    """With extreme γ, the multiplicative factor saturates to exactly 1.3 (tanh→1)."""
+    """With extreme γ, the multiplicative factor saturates to exactly 1.15 (tanh→1)."""
     fusion_dim = 320
     x          = torch.rand(BATCH, fusion_dim)
     gamma_beta = torch.full((BATCH, fusion_dim * 2), 1e6)   # saturates tanh to +1
 
     result   = fresh_model_no_comp._film(x, gamma_beta)
-    expected = x * 1.3 + 0.3                                # scale=1.3, shift=+0.3
+    expected = x * 1.15 + 0.15                              # scale=1.15, shift=+0.15
     assert torch.allclose(result, expected, atol=1e-4)
 
 
 def test_film_additive_shift_positive_bound(fresh_model_no_comp):
-    """Additive shift with extreme positive β and zero input must equal +0.3."""
+    """Additive shift with extreme positive β and zero input must equal +0.15."""
     fusion_dim = 320
     x          = torch.zeros(BATCH, fusion_dim)
     gamma_beta = torch.full((BATCH, fusion_dim * 2), 1e6)
 
     result = fresh_model_no_comp._film(x, gamma_beta)
-    assert torch.allclose(result, torch.full_like(result, 0.3), atol=1e-4)
+    assert torch.allclose(result, torch.full_like(result, 0.15), atol=1e-4)
 
 
 def test_film_additive_shift_negative_bound(fresh_model_no_comp):
-    """Additive shift with extreme negative β and zero input must equal -0.3."""
+    """Additive shift with extreme negative β and zero input must equal -0.15."""
     fusion_dim = 320
     x          = torch.zeros(BATCH, fusion_dim)
-    gamma_beta = torch.full((BATCH, fusion_dim * 2), -1e6)  # tanh→-1 → shift=-0.3
+    gamma_beta = torch.full((BATCH, fusion_dim * 2), -1e6)  # tanh→-1 → shift=-0.15
 
     result = fresh_model_no_comp._film(x, gamma_beta)
-    assert torch.allclose(result, torch.full_like(result, -0.3), atol=1e-4)
+    assert torch.allclose(result, torch.full_like(result, -0.15), atol=1e-4)

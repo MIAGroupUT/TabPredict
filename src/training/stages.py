@@ -205,7 +205,7 @@ def build_optimizer(model: nn.Module, stage: str) -> torch.optim.Optimizer:
     else:
         raise ValueError(f"Unknown stage: {stage!r}")
 
-    return torch.optim.AdamW(param_groups, weight_decay=1e-4)
+    return torch.optim.AdamW(param_groups, weight_decay=5e-4)
 
 
 # ── parameter accounting ──────────────────────────────────────────────────────
