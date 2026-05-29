@@ -93,10 +93,10 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 - Filters unexpected legacy keys with `strict=False`
 - Raises `RuntimeError` on missing keys with `strict=True`
 
-**FiLM clamp (±0.1):**
-- Multiplicative scale `1 + tanh(γ) × 0.1` saturates to 1.1 with extreme positive γ
-- Additive shift `tanh(β) × 0.1` saturates to +0.1 with extreme positive β (zero input)
-- Additive shift saturates to −0.1 with extreme negative β (zero input)
+**FiLM clamp (±0.3):**
+- Multiplicative scale `1 + tanh(γ) × 0.3` saturates to 1.3 with extreme positive γ
+- Additive shift `tanh(β) × 0.3` saturates to +0.3 with extreme positive β (zero input)
+- Additive shift saturates to −0.3 with extreme negative β (zero input)
 
 ---
 
@@ -219,14 +219,15 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 - `get_val_runtime_transforms` and `get_train_runtime_transforms` return callables
 
 **Tensor keys:**
-- Without complications: `"ctad"`, `"clin"`, `"aaa"`, `"reint"` are present; no `"comp"` key
+- Without complications: `"cta"`, `"clin"`, `"aaa"`, `"reint"` are present; no `"comp"` key
 - With complications: `"comp"` key is also present
 
 **`build_loaders`:**
 - Returns a `(train_loader, val_loader)` tuple
-- Train DataLoader is built with `shuffle=True` (natural class distribution; imbalance handled via `pos_weight` in the loss)
+- Train DataLoader uses `WeightedRandomSampler` (50/50 pos/neg batches; replaces `shuffle=True`)
 - Val DataLoader is built with `shuffle=False` (deterministic evaluation order)
 - Requested `batch_size` is forwarded to both loaders
+- `_make_weighted_sampler`: correct weight assignment (1/N_pos for positives, 1/N_neg for negatives); returns `WeightedRandomSampler`; sampler count equals dataset length
 
 `CacheDataset` and `torch.utils.data.DataLoader` are mocked so no NIfTI files or GPU workers are needed.
 

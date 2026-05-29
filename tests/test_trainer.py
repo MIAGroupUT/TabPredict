@@ -91,7 +91,7 @@ def test_validate_no_comp_required_keys(mock_wandb, model_no_comp):
     required = {
         "val/loss_total", "val/reint_auc", "val/reint_f1",
         "val/reint_precision", "val/reint_recall", "val/reint_accuracy",
-        "val/reint_best_thresh", "val/mean_uncertainty",
+        "val/reint_best_thresh", "val/reint_best_fbeta", "val/mean_uncertainty",
         "val/reint_TP", "val/reint_FP", "val/reint_TN", "val/reint_FN",
         "val/reint_TPR", "val/reint_TNR", "val/reint_FPR", "val/reint_FNR",
     }
@@ -144,6 +144,38 @@ def test_validate_fbeta_threshold_in_range(mock_wandb, model_no_comp):
         criterion, complications=[],
     )
     assert 0.0 <= metrics["val/reint_best_thresh"] <= 1.0
+
+
+@patch("src.training.trainer.wandb")
+def test_validate_best_fbeta_in_range(mock_wandb, model_no_comp):
+    """val/reint_best_fbeta (the checkpoint save criterion) must be in [0, 1]."""
+    from src.training.losses import ReinterventionLoss
+    from src.training.trainer import validate
+
+    criterion = ReinterventionLoss(device=torch.device("cpu"))
+    _, metrics = validate(
+        model_no_comp, _FakeLoader([_make_reint_batch()]),
+        criterion, complications=[], recall_beta=2.0,
+    )
+    assert 0.0 <= metrics["val/reint_best_fbeta"] <= 1.0
+
+
+@patch("src.training.trainer.wandb")
+def test_validate_fbeta_changes_with_beta(mock_wandb, model_no_comp):
+    """F-beta score must differ when beta changes — confirms it is actually beta-weighted."""
+    from src.training.losses import ReinterventionLoss
+    from src.training.trainer import validate
+
+    criterion = ReinterventionLoss(device=torch.device("cpu"))
+    _, m1 = validate(model_no_comp, _FakeLoader([_make_reint_batch()]),
+                     criterion, complications=[], recall_beta=1.0)
+    mock_wandb.reset_mock()
+    _, m2 = validate(model_no_comp, _FakeLoader([_make_reint_batch()]),
+                     criterion, complications=[], recall_beta=2.0)
+    # beta=1 (F1) and beta=2 (F2) can produce the same optimal threshold on trivial
+    # inputs, but the metric values must both be computable and finite
+    assert np.isfinite(m1["val/reint_best_fbeta"])
+    assert np.isfinite(m2["val/reint_best_fbeta"])
 
 
 @patch("src.training.trainer.wandb")

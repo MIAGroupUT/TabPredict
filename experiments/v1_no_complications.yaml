@@ -1,12 +1,11 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Experiment: v1_no_complications:
-#   - gate_l1_weight 0.0001 → 0.002  (10× stronger clinical feature sparsity)
-#   - label_smoothing 0.02 → 0.05
-#   - p_clinical 0.20 → 0.30         (Stage A now also applies modality dropout)
-#   - condition_net 320→256→640      (was 320→512→640; ~50% fewer params)
-#   - clinical_branch Dropout 0.2/0.1 → 0.4/0.3
-#   - FiLM clamp 0.3 → 0.15
-#   - weight_decay 1e-4 → 5e-4
+# Experiment: v1_no_complications (v2 hyperparams):
+#   - WeightedRandomSampler added      (50/50 balanced batches; replaces inflated pos_weight)
+#   - gate_l1_weight 0.002 → 0.0005   (loosen feature sparsity; stop zeroing signal)
+#   - label_smoothing 0.05 → 0.02     (let positives look more positive)
+#   - clinical_branch Dropout 0.4/0.3 → 0.3/0.2  (less aggressive; in model code)
+#   - FiLM clamp 0.15 → 0.3           (allow fusion to modulate more; in model code)
+#   - checkpoint criterion: AUC → F2  (recall-weighted; in trainer)
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: v1_no_complications
@@ -26,18 +25,18 @@ training:
   seed: 3299
   batch_size: 8
   num_workers: 8
-  image_size: [128, 128, 128]
-  voxel_spacing: [1.5, 1.5, 1.5]
-  hu_range: [-200, 400]
+  image_size: [224, 224, 160]
+  voxel_spacing: [1.5, 1.5, 3]
+  hu_range: [-1000, 1000]
   train_cache_rate: 0.5
   val_cache_rate: 1.0
 
   # Loss hyperparameters
   focal_gamma: 2.0
-  label_smoothing: 0.05
-  pos_weight: 4.58           # N_neg/N_pos in training set (302/66)
-  gate_l1_weight: 0.002      # was 0.0001; strong sparsity on 241 clinical features
-  recall_beta: 2.0
+  label_smoothing: 0.02
+  pos_weight: 4.58           # raw N_neg/N_pos ratio; sampler already balances batches 50/50
+  gate_l1_weight: 0.0005     # gentle sparsity; 0.002 was zeroing too many features
+  recall_beta: 2.0           # checkpoint saved by F2-score (recall-weighted)
 
   # Causal modality dropout — applied in BOTH Stage A and Stage B
   modality_dropout:
@@ -63,8 +62,8 @@ training:
 
 paths:
   base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  cache_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/monai_cache
   checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_no_complications
+  cache_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/monai_cache
 
 wandb:
   project: AAA-Reintervention-Risk

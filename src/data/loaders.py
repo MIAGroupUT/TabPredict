@@ -22,6 +22,7 @@ import numpy as np
 import torch
 from monai.data import CacheDataset
 from monai.transforms import (
+    CenterSpatialCropd,
     Compose,
     EnsureChannelFirstd,
     LoadImaged,
@@ -30,18 +31,17 @@ from monai.transforms import (
     RandBiasFieldd,
     RandGaussianNoised,
     RandScaleIntensityd,
-    Resized,
     ScaleIntensityRanged,
     Spacingd,
+    SpatialPadd,
     ToTensord,
 )
 
 # default image geometry — can be overridden via config
-DEFAULT_SIZE    = (128, 128, 128)
-DEFAULT_SPACING = (1.5, 1.5, 1.5)
-DEFAULT_HU_MIN  = -200
-DEFAULT_HU_MAX  =  400
-
+DEFAULT_SIZE    = (224, 224, 160)
+DEFAULT_SPACING = (1.5, 1.5, 3)
+DEFAULT_HU_MIN  = -1000
+DEFAULT_HU_MAX  =  1000
 
 # ── I/O helpers ──────────────────────────────────────────────────────────────
 
@@ -213,11 +213,8 @@ def get_cached_transforms(
         ScaleIntensityRanged(
             keys=["ct"], a_min=hu_min, a_max=hu_max, b_min=0.0, b_max=1.0, clip=True
         ),
-        Resized(
-            keys=["ct", "lbl", "dst"],
-            spatial_size=size,
-            mode=("trilinear", "nearest", "trilinear"),
-        ),
+        SpatialPadd(keys=["ct", "lbl", "dst"], spatial_size=size),
+        CenterSpatialCropd(keys=["ct", "lbl", "dst"], roi_size=size),
     ])
 
 
@@ -280,6 +277,34 @@ class RuntimeDataset(torch.utils.data.Dataset):
         return self.runtime(self.base_ds[idx])
 
 
+def _make_weighted_sampler(
+    train_files: list[dict],
+    seed: int = 3299,
+) -> "torch.utils.data.WeightedRandomSampler":
+    """Return a WeightedRandomSampler that draws positives and negatives equally.
+
+    Each positive sample gets weight 1/N_pos and each negative gets 1/N_neg, so
+    every training epoch contains an equal expected number of each class regardless
+    of the natural ~18/82 split.  pos_weight in the loss can then stay at or near
+    the raw class ratio without double-counting.
+    """
+    from torch.utils.data import WeightedRandomSampler
+
+    labels  = [int(s["reintervention_label"][0]) for s in train_files]
+    n_pos   = max(sum(labels), 1)
+    n_neg   = max(len(labels) - n_pos, 1)
+    w_pos   = 1.0 / n_pos
+    w_neg   = 1.0 / n_neg
+    weights = [w_pos if l == 1 else w_neg for l in labels]
+
+    g = torch.Generator()
+    g.manual_seed(seed)
+    print(f"WeightedRandomSampler: {n_pos} pos / {n_neg} neg  "
+          f"(w_pos={w_pos:.4f}, w_neg={w_neg:.4f})")
+    return WeightedRandomSampler(weights, num_samples=len(weights),
+                                 replacement=True, generator=g)
+
+
 def build_loaders(
     splits: dict,
     config: dict,
@@ -298,8 +323,12 @@ def build_loaders(
     seed: int = 3299,
 ) -> tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
     """
-    Build train and val DataLoaders. Natural class distribution is used;
-    class imbalance is handled via pos_weight in the loss.
+    Build train and val DataLoaders.
+
+    The train loader uses WeightedRandomSampler to present ~50/50 positive/negative
+    batches, eliminating the natural ~18/82 class skew.  pos_weight in the loss
+    then encodes the residual clinical preference for recall over precision, without
+    needing to be inflated to compensate for imbalance.
     """
     from torch.utils.data import DataLoader
 
@@ -329,13 +358,13 @@ def build_loaders(
         np.random.seed(worker_seed)
         torch.manual_seed(worker_seed)
 
-    generator = torch.Generator()
-    generator.manual_seed(seed)
+    sampler = _make_weighted_sampler(train_files, seed=seed)
 
     loader_kwargs = dict(num_workers=num_workers, pin_memory=True,
                          persistent_workers=True, prefetch_factor=2,
                          worker_init_fn=_worker_init)
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
-                              generator=generator, **loader_kwargs)
-    val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False,  **loader_kwargs)
+    # shuffle=True is mutually exclusive with sampler; sampler handles ordering.
+    train_loader = DataLoader(train_ds, batch_size=batch_size,
+                              sampler=sampler, **loader_kwargs)
+    val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False, **loader_kwargs)
     return train_loader, val_loader

@@ -63,7 +63,7 @@ def _heteroscedastic(
 class ReinterventionLoss(nn.Module):
     """
     For the no-complications model variant.
-    WeightedRandomSampler already balances batches ~50/50, so pos_weight=1.0.
+    Class imbalance is handled via pos_weight in the loss (no sampler in the dataloader).
     """
 
     def __init__(

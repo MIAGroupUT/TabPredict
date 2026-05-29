@@ -5,7 +5,7 @@
 `ReinterventionRiskModel` is a multi-modal, multi-task neural network. It fuses three independent input branches — a 3D visual branch, a clinical tabular branch, and an AAA geometry branch — into a shared 320-dimensional representation, which is then passed through task-specific output heads.
 
 ```
-CTA volume (4-ch, 128³)
+CTA volume (4-ch, 224×224×160)
     → cta_adapter (Conv3d 4→1)
     → Merlin I3ResNet (frozen, BN adapted in Stage B)
     → visual_proj (Linear 2048→256)           → 256-dim visual embedding ─────┐
@@ -19,7 +19,7 @@ AAA geometry (5 scalars)                                                      �
                                                         │
                                           cat → 320-dim fused representation
                                                         │
-                                          FiLM (condition_net: γ/β, tanh×0.1)
+                                          FiLM (condition_net: γ/β, tanh×0.3)
                                           LayerNorm (fusion_norm)
                                                         │
                                ┌────────────────────────┤
@@ -49,10 +49,10 @@ The 4-channel CTA input concatenates: CT intensity · lumen segmentation mask ·
 | Component | Detail |
 |---|---|
 | `feature_gate` | Learnable `nn.Parameter` of shape `(clinical_dim,)`, passed through sigmoid at forward time. Gates each clinical feature independently. L1-regularised to encourage sparsity. |
-| `clinical_branch` | Two-layer MLP: `Linear(clinical_dim, 128) → GELU → Linear(128, 32)` |
+| `clinical_branch` | Two-layer MLP: `Linear(clinical_dim, 128) → LayerNorm → ReLU → Dropout(0.3) → Linear(128, 32) → Dropout(0.2)` |
 | Input | z-normalised feature vector (~744 features from RADAR); see [Data](data.md) |
 
-The feature gate multiplies the normalised input elementwise before passing it to the MLP. Features with gate values near zero are effectively suppressed. The L1 penalty (`gate_l1_weight`, default 0.0001) keeps the gate sparse without over-suppressing on this dataset size.
+The feature gate multiplies the normalised input elementwise before passing it to the MLP. Features with gate values near zero are effectively suppressed. The L1 penalty (`gate_l1_weight`, default 0.0005) keeps the gate sparse without over-suppressing on this dataset size.
 
 ### AAA Metrics Branch
 
@@ -79,13 +79,13 @@ After concatenating the three branch embeddings (256 + 32 + 32 = **320-dim**), a
 
 ```
 γ, β = condition_net(fused)          # two linear heads
-γ = tanh(γ) × 0.1                    # clamp to (-0.1, +0.1)
-β = tanh(β) × 0.1
+γ = tanh(γ) × 0.3                    # clamp to (-0.3, +0.3)
+β = tanh(β) × 0.3
 fused = (1 + γ) × fused + β          # modulate
 fused = fusion_norm(fused)           # LayerNorm
 ```
 
-The tight ±0.1 clamp on γ/β keeps the FiLM layer as a small perturbation rather than a full re-scaling. This stabilises training by preventing the condition network from dominating the fused representation.
+The ±0.3 clamp on γ/β allows meaningful cross-modal modulation (±30%) while staying stable during training.
 
 ---
 
@@ -153,7 +153,7 @@ fused = model(cta, clin, aaa, return_fused=True)   # (B, 320)
 |---|---|
 | Merlin I3ResNet backbone | Pretrained on 110k CT scans; strong 3D medical imaging priors without training from scratch |
 | BN-only adaptation (layer3/4) | Recalibrates feature statistics per scanner type with ~50 K params; avoids catastrophic forgetting while correcting scanner-domain bias |
-| FiLM clamped to ±0.1 | Stable cross-modal modulation; prevents the fusion layer from overwhelming the branch representations |
+| FiLM clamped to ±0.3 | Allows meaningful cross-modal modulation (±30%) while staying stable during training |
 | Per-feature sigmoid gate (L1-regularised) | Soft feature selection over ~744 clinical features; interpretable — gate values can be inspected post-training |
 | Heteroscedastic log-variance, clamped [-4, 2] | Lets the model express calibrated confidence; quadratic penalty prevents degenerate high-uncertainty predictions |
 | F-beta (β=2) threshold | Weights recall 4× over precision — missing a reintervention is clinically worse than a false alarm |

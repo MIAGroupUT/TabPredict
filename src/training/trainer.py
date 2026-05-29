@@ -409,7 +409,7 @@ def run_pipeline(cfg: dict) -> None:
         print_model_param_overview(model)
         model = model.to(DEVICE).to(memory_format=torch.channels_last_3d)
 
-        best_val_auc     = 0.0
+        best_val_fbeta   = 0.0
         patience_counter = 0
         gate_l1_w        = cfg["training"].get("gate_l1_weight", 1e-3)
         apply_dropout    = True  # both stages; Stage A needs it to prevent clinical memorisation
@@ -471,7 +471,8 @@ def run_pipeline(cfg: dict) -> None:
             tqdm.write(
                 f"[Stage {st} | Epoch {epoch:03d}]  "
                 f"train={train_loss/len(train_loader):.4f}  val={val_loss:.4f}  "
-                f"auc={val_metrics.get('val/reint_auc', 0):.4f}"
+                f"auc={val_metrics.get('val/reint_auc', 0):.4f}  "
+                f"f{recall_beta:.0f}={val_metrics.get('val/reint_best_fbeta', 0):.4f}"
             )
 
             if (epoch + 1) % 3 == 0:
@@ -490,9 +491,11 @@ def run_pipeline(cfg: dict) -> None:
                     size=size, batch_size=batch_size,
                 )
 
-            val_auc = val_metrics.get("val/reint_auc", 0.5)
-            if val_auc > best_val_auc:
-                best_val_auc     = val_auc
+            # Save by F-beta (recall-weighted) rather than AUC: in a safety-critical
+            # setting catching all positives (recall) matters more than discrimination.
+            val_fbeta = val_metrics.get("val/reint_best_fbeta", 0.0)
+            if val_fbeta > best_val_fbeta:
+                best_val_fbeta   = val_fbeta
                 patience_counter = 0
                 torch.save(
                     {
@@ -506,11 +509,19 @@ def run_pipeline(cfg: dict) -> None:
                     },
                     checkpoint_dir / f"best_stage_{st.lower()}.pt",
                 )
-                print(f"  ✓ Checkpoint saved (AUC={best_val_auc:.4f})")
+                print(
+                    f"  ✓ Checkpoint saved "
+                    f"(F{recall_beta:.0f}={best_val_fbeta:.4f}, "
+                    f"AUC={val_metrics.get('val/reint_auc', 0):.4f}, "
+                    f"rec={val_metrics.get('val/reint_recall', 0):.4f})"
+                )
             else:
                 patience_counter += 1
                 if patience_counter >= stage_cfg.get("patience", 8):
-                    print(f"Early stopping at epoch {epoch} (best AUC={best_val_auc:.4f})")
+                    print(
+                        f"Early stopping at epoch {epoch} "
+                        f"(best F{recall_beta:.0f}={best_val_fbeta:.4f})"
+                    )
                     break
 
     wandb.finish()

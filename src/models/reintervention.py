@@ -136,9 +136,9 @@ class ReinterventionRiskModel(nn.Module):
 
         self.clinical_branch = nn.Sequential(
             nn.Linear(clinical_dim, 128), nn.LayerNorm(128), nn.ReLU(),
-            nn.Dropout(0.4),
-            nn.Linear(128, 32),
             nn.Dropout(0.3),
+            nn.Linear(128, 32),
+            nn.Dropout(0.2),
         )
         self.aaa_metrics_branch = nn.Sequential(
             nn.Linear(aaa_dim, 32), nn.ReLU(),
@@ -171,7 +171,7 @@ class ReinterventionRiskModel(nn.Module):
 
     def _film(self, x: torch.Tensor, gamma_beta: torch.Tensor) -> torch.Tensor:
         gamma, beta = gamma_beta.chunk(2, dim=1)
-        return x * (1 + torch.tanh(gamma) * 0.15) + torch.tanh(beta) * 0.15
+        return x * (1 + torch.tanh(gamma) * 0.3) + torch.tanh(beta) * 0.3
 
     def _encode_visual(self, cta: torch.Tensor) -> torch.Tensor:
         v = self.visual_branch(cta)

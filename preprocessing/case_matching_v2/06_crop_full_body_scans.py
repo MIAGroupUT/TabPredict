@@ -13,11 +13,12 @@ three paired files remain spatially consistent after cropping.
 Motivation
 ----------
 Full-body CTAs (head-to-toe) contain large empty axial regions above the
-renal arteries and below the iliac bifurcation.  Without cropping, MONAI's
-Resized(128³) transform compresses the aortic sac into only ~10–20 of the 128
-target slices, destroying the spatial resolution the I3ResNet needs.  After
-cropping, the aorta fills the full axial extent and the 128-slice resize is
-clinically meaningful.
+renal arteries and below the iliac bifurcation.  The MONAI pipeline resamples
+to (1.5, 1.5, 3) mm and then pads/crops to (224, 224, 160) voxels.  The
+target axial physical extent is 160 × 3 mm = 480 mm.  Without cropping, the
+aortic sac occupies only a small fraction of the 160-slice target.  After
+cropping this script guarantees the axial physical extent is ≥ 480 mm, so the
+aorta fills the full target volume and zero-padding is minimal.
 
 Only the axial (S-I) axis is cropped.  X/Y dimensions are left unchanged.
 
@@ -173,13 +174,34 @@ def process_scan(
     pad        = max(1, round(pad_frac * extent))
     crop_start = max(0, z_min - pad)
     crop_end   = min(total, z_max + pad + 1)
-    new_size   = crop_end - crop_start
+
+    # Ensure the cropped axial extent covers at least 160 × 3 mm = 480 mm in
+    # physical space so that after resampling to 3 mm z-spacing the volume has
+    # ≥ 160 slices.  Without this, SpatialPadd fills most of the target volume
+    # with zeros and Merlin sees very little anatomy.
+    axial_voxel_mm = float(np.linalg.norm(affine[:3, axial_ax]))
+    min_voxels     = int(np.ceil(480.0 / axial_voxel_mm))
+    current_extent = crop_end - crop_start
+    if current_extent < min_voxels:
+        deficit    = min_voxels - current_extent
+        expand_lo  = deficit // 2
+        expand_hi  = deficit - expand_lo
+        crop_start = max(0, crop_start - expand_lo)
+        crop_end   = min(total, crop_end + expand_hi)
+        # If one boundary was hit, compensate on the other side
+        if crop_start == 0:
+            crop_end = min(total, min_voxels)
+        if crop_end == total:
+            crop_start = max(0, total - min_voxels)
+
+    new_size  = crop_end - crop_start
+    phys_mm   = new_size * axial_voxel_mm
 
     dist_note = " + distmap" if dist_path.exists() else ""
     status = (
         f"[{'DRY' if dry_run else 'CROP'}] {stem}: "
-        f"{total} → {new_size} slices  "
-        f"(aorta {z_min}–{z_max}, pad ±{pad}, keep [{crop_start}:{crop_end}])"
+        f"{total} → {new_size} slices ({phys_mm:.0f} mm)  "
+        f"(aorta {z_min}–{z_max}, pad ±{pad}, min {min_voxels} vox, keep [{crop_start}:{crop_end}])"
         f"{dist_note}"
     )
 

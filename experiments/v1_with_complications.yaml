@@ -1,6 +1,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Experiment: v1_with_complications:
-#   - Same regularisation improvements as v2_no_complications
+# Experiment: v1_with_complications (v2 hyperparams):
+#   - WeightedRandomSampler added      (50/50 balanced batches; replaces inflated pos_weight)
+#   - gate_l1_weight 0.002 → 0.0005   (loosen feature sparsity)
+#   - label_smoothing 0.05 → 0.02     (let positives look more positive)
+#   - comp_weight_stage_a 0.1 → 0.01  (Stage A warms up reintervention head cleanly)
+#   - clinical_branch Dropout 0.4/0.3 → 0.3/0.2  (in model code)
+#   - FiLM clamp 0.15 → 0.3           (in model code)
+#   - checkpoint criterion: AUC → F2  (in trainer)
 #   - comp_loss_weights: per-complication contribution to comp gradient
 #       scaled by sqrt(N_pos_train / N_pos_max) to down-weight rare tasks
 #   - comp_pos_weights: per-complication N_neg/N_pos (capped at 20 for stability)
@@ -39,20 +45,20 @@ training:
   seed: 3299
   batch_size: 8
   num_workers: 16
-  image_size: [128, 128, 128]
-  voxel_spacing: [1.5, 1.5, 1.5]
-  hu_range: [-200, 400]
+  image_size: [224, 224, 160]
+  voxel_spacing: [1.5, 1.5, 3]
+  hu_range: [-1000, 1000]
   train_cache_rate: 0.5
   val_cache_rate: 1.0
 
   # Loss hyperparameters
   focal_gamma: 2.0
-  label_smoothing: 0.05
-  pos_weight: 4.58
-  gate_l1_weight: 0.002
-  recall_beta: 2.0
+  label_smoothing: 0.02
+  pos_weight: 4.58           # raw N_neg/N_pos ratio; sampler already balances batches 50/50
+  gate_l1_weight: 0.0005     # gentle sparsity; 0.002 was zeroing too many features
+  recall_beta: 2.0           # checkpoint saved by F2-score (recall-weighted)
 
-  comp_weight_stage_a: 0.1
+  comp_weight_stage_a: 0.01  # near-zero in Stage A so reintervention head warms up cleanly
   comp_weight_stage_b: 0.3
 
   # Per-complication loss weights (relative contribution to comp gradient)
@@ -100,8 +106,8 @@ training:
 
 paths:
   base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  cache_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/monai_cache_comp
   checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_with_complications
+  cache_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/monai_cache_comp
 
 wandb:
   project: AAA-Reintervention-Risk

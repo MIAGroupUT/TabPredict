@@ -25,8 +25,16 @@ python 05_nnUNet_labels_metrics_generation.py \
 
 import argparse
 import json
+import os
 import shutil
 from pathlib import Path
+
+# nnUNet checks these at import time; set fallbacks before importing so the path
+# warnings are suppressed. For inference via initialize_from_trained_model_folder
+# none of these paths are actually read.
+os.environ.setdefault("nnUNet_raw",          "/tmp/nnunet_raw")
+os.environ.setdefault("nnUNet_preprocessed", "/tmp/nnunet_preprocessed")
+os.environ.setdefault("nnUNet_results",      "/tmp/nnunet_results")
 
 import nibabel as nib
 import numpy as np
@@ -106,6 +114,9 @@ def run_prediction(
     tmp_dir = output_base / f"_tmp_{stem}"
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
+    # nnUNet may chdir internally; reset to a stable path so the next
+    # multiprocessing spawn can call os.getcwd() on a directory that exists.
+    os.chdir(output_base)
     predictor.predict_from_files(
         [[str(scan_path)]],
         str(tmp_dir),

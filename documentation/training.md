@@ -59,7 +59,7 @@ Component by component:
 | `+ 0.5 × (exp(logvar) − 1 − logvar)` | KL-style symmetric prior — minimum is 0 at logvar=0, penalises both logvar→+∞ (exponential) and logvar→−∞ (linear). When train BCE→0 the optimal logvar→0, preventing the train loss from going negative and the val loss from inflating via a large precision amplifier. |
 
 Additional settings:
-- **Label smoothing** ε = 0.05 — slightly softens the hard 0/1 targets
+- **Label smoothing** ε = 0.02 — slightly softens the hard 0/1 targets
 - **logvar clamp** [-4, 2] applied inside the forward pass before the loss is computed
 
 The forward returns `(loss_scalar, details_dict)` where `details_dict` contains `loss_total`, `loss_reint`, `mean_uncertainty`.
@@ -83,7 +83,7 @@ Added to the total loss in both variants:
 loss += gate_l1_weight × sigmoid(feature_gate).sum()
 ```
 
-This pushes feature gate values toward zero for unimportant features, producing a sparse gate after training. The weight is kept small (default 0.0001) to avoid over-suppressing features on this dataset size.
+This pushes feature gate values toward zero for unimportant features, producing a sparse gate after training. The weight is kept small (default 0.0005) to avoid over-suppressing features on this dataset size.
 
 ---
 
@@ -132,13 +132,13 @@ Both stages use `CosineAnnealingWarmRestarts` with:
 
 ## Causal Modality Dropout
 
-Applied only during **Stage B training** to simulate real-world missingness and force all modalities to develop independent representations.
+Applied during **both Stage A and Stage B training** to simulate real-world missingness and force all modalities to develop independent representations.
 
 ```
 p(CTA missing)                = p_cta           (default 0.10)
 p(AAA missing | CTA dropped)  = p_aaa_given_cta  (default 0.15)
 p(AAA missing | CTA present)  = p_aaa_given_clin (default 0.15)
-p(Clinical missing)           = p_clinical      (default 0.20)
+p(Clinical missing)           = p_clinical      (default 0.30)
 ```
 
 **Causal constraint:** AAA metrics are derived from CTA segmentation, so they cannot logically be available when the CTA is absent. The dropout logic encodes this: when CTA is zeroed out for a sample, the AAA tensor for that sample is also zeroed out with additional probability.
@@ -151,13 +151,13 @@ At inference time, dropout is never applied. `maybe_apply_modality_dropout(is_tr
 
 ## Class Imbalance Handling
 
-The training set has approximately 18% positive (reintervention) cases. Rather than a balanced sampler (which would create a distribution shift between training and test that miscalibrates output probabilities), the DataLoader uses `shuffle=True` with the natural class distribution. The loss compensates via `pos_weight = N_neg / N_pos ≈ 4.58`, which weights missed positives ~4.6× more heavily than missed negatives. This keeps the model probability outputs calibrated to the true population prevalence.
+The training set has approximately 18% positive (reintervention) cases. The DataLoader uses a `WeightedRandomSampler` that draws positives and negatives with equal frequency (weight = 1/N_class per sample), producing roughly 50/50 batches. This eliminates the need to inflate `pos_weight` purely to counteract skew. `pos_weight = N_neg/N_pos ≈ 4.58` is still applied in the loss to encode the clinical preference: a missed positive (FN) is more costly than a false alarm (FP). The checkpoint is saved when the validation **F2-score** (β=2, weighting recall 4× over precision) improves, directly optimising for sensitivity rather than discrimination.
 
 ---
 
 ## Checkpoints
 
-At the end of each epoch, if validation AUC improves, the trainer saves:
+At the end of each epoch, if validation F2-score (recall_beta=2.0) improves, the trainer saves:
 
 ```python
 {
@@ -179,7 +179,7 @@ Checkpoints are written to `paths.checkpoint_dir` (see [Configuration](configura
 
 ## Early Stopping
 
-Each stage has a configurable `patience` (number of epochs without AUC improvement before stopping). Defaults: Stage A patience=12, Stage B patience=20.
+Each stage has a configurable `patience` (number of epochs without F2-score improvement before stopping). Defaults: Stage A patience=12, Stage B patience=20.
 
 ---
 

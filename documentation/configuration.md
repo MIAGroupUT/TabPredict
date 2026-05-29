@@ -29,25 +29,31 @@ training:
   seed: 3299                  # global seed for Python, NumPy, PyTorch, CUDA
   batch_size: 8               # samples per GPU batch
   num_workers: 16             # DataLoader worker processes
-  image_size: [128, 128, 128] # spatial dimensions after preprocessing
-  voxel_spacing: [1.5, 1.5, 1.5]  # isotropic resampling target (mm)
+  image_size: [224, 224, 160] # spatial dimensions after preprocessing
+  voxel_spacing: [1.5, 1.5, 3]    # resampling target (mm); matches Merlin's pretrained geometry
+  hu_range: [-1000, 1000]      # HU clip range for CT intensity scaling
 
   # Loss parameters
   focal_gamma: 2.0            # focal loss exponent (down-weights easy negatives)
   label_smoothing: 0.02       # soft target smoothing (reduces overconfidence)
   pos_weight: 4.58            # BCE positive class weight = N_neg/N_pos (302/66 in training set)
-  gate_l1_weight: 0.0001      # L1 regularisation weight on feature gate
+                              # Note: train batches are balanced 50/50 pos/neg via WeightedRandomSampler,
+                              # so pos_weight encodes clinical preference (FN more costly than FP), not raw imbalance
+  gate_l1_weight: 0.0005      # L1 regularisation weight on feature gate
 
   # Threshold selection
   recall_beta: 2.0            # β for F-beta threshold search over PR curve
                               # β > 1 → recall weighted more than precision
 
-  # Modality dropout (Stage B training only)
+  # Modality dropout (applied in both Stage A and Stage B training)
   modality_dropout:
     p_cta: 0.10               # probability of zeroing CTA for a batch sample
     p_aaa_given_cta: 0.15     # probability of zeroing AAA when CTA is already dropped
     p_aaa_given_clin: 0.15    # probability of zeroing AAA when CTA is present
-    p_clinical: 0.20          # probability of zeroing clinical features (non-causal regulariser)
+    p_clinical: 0.30          # probability of zeroing clinical features (non-causal regulariser)
+
+  train_cache_rate: 0.5       # fraction of training data cached in RAM by MONAI CacheDataset
+  val_cache_rate: 1.0         # val set fully cached (smaller, always fits in RAM)
 
   # XAI logging to W&B during training
   xai_every_n_epochs: 3       # run full_explain() on val samples every N epochs
@@ -58,7 +64,7 @@ training:
   stages:
     - name: A
       epochs: 60              # maximum epochs (early stopping may end it sooner)
-      patience: 12            # stop if val AUC does not improve for this many epochs
+      patience: 12            # stop if val F2-score does not improve for this many epochs
       T_0: 20                 # CosineAnnealingWarmRestarts restart period (epochs)
 
     - name: B
@@ -99,7 +105,7 @@ model:
 training:
   # comp_weight scales the complication loss relative to the reintervention loss
   # Typically lower in Stage A (tabular warm-up) and higher in Stage B
-  comp_weight_stage_a: 0.1
+  comp_weight_stage_a: 0.01
   comp_weight_stage_b: 0.3
 ```
 

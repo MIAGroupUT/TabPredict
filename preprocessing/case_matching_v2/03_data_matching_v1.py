@@ -219,6 +219,26 @@ def scan_paths(
 
 
 # =========================================================
+# COMPLICATION TIMING HELPERS
+# =========================================================
+
+def _extract_fu_number(col_name: str) -> int | None:
+    """Extract follow-up visit number from column name, e.g. 'FU3_...' → 3."""
+    m = re.match(r"^FU(\d+)_", col_name, re.I)
+    return int(m.group(1)) if m else None
+
+
+def _find_visit_date(fu_num: int, row: dict, df_columns: list) -> datetime.date | None:
+    """Return visit date for FU{fu_num} from Vas date columns (FU{N}_Vas{N}_Fu_VDate_...)."""
+    for c in df_columns:
+        if re.match(rf"^FU{fu_num}_Vas{fu_num}_Fu_VDate", c, re.I):
+            d = _parse_op_date(row.get(c))
+            if d is not None:
+                return d
+    return None
+
+
+# =========================================================
 # GROUND TRUTH EXTRACTION
 # =========================================================
 
@@ -237,7 +257,7 @@ COMP_PATTERNS = {
 }
 
 
-def extract_ground_truth(row, df_columns: list) -> dict:
+def extract_ground_truth(row, df_columns: list, op_date: datetime.date | None = None) -> dict:
     """Extract all outcome labels from a SPSS patient row."""
     reint_summary = is_flagged(row.get("ReintervAAArel_0m18m_yn"))
     reint_ae_cols = [c for c in df_columns if re.search(r"AEAction.*answer4", c)]
@@ -273,15 +293,25 @@ def extract_ground_truth(row, df_columns: list) -> dict:
     fu_ct = next((float(row.get(c)) for c, _ in fu_cands_ct if pd.notna(row.get(c))), None)
     fu_us = next((float(row.get(c)) for c, _ in fu_cands_us if pd.notna(row.get(c))), None)
 
+    diam_mapping = None
     if bl_ct is not None and fu_ct is not None:
         bl_val, fu_val = bl_ct, fu_ct
+        diam_mapping = "CT-CT"
     elif bl_us is not None and fu_us is not None:
         bl_val, fu_val = bl_us, fu_us
+        diam_mapping = "US-US"
     else:
         bl_gen = [c for c in df_columns if re.search(r"^Bl_AAAdiam$", c)]
-        bl_val = next((float(row.get(c)) for c in bl_gen if pd.notna(row.get(c))), None) \
-                 if (bl_ct is None and bl_us is None) else (bl_ct or bl_us)
+        if bl_ct is None and bl_us is None:
+            bl_val = next((float(row.get(c)) for c in bl_gen if pd.notna(row.get(c))), None)
+            _bl_src = "GEN"
+        else:
+            bl_val = bl_ct or bl_us
+            _bl_src = "CT" if bl_ct is not None else "US"
         fu_val = fu_ct or fu_us
+        _fu_src = "CT" if fu_ct is not None else ("US" if fu_us is not None else None)
+        if bl_val is not None and fu_val is not None:
+            diam_mapping = f"{_bl_src}-{_fu_src}"
 
     diam_diff    = (fu_val - bl_val) if (bl_val is not None and fu_val is not None) else None
     sac_regression = int(diam_diff is not None and diam_diff <= -5.0)
@@ -289,9 +319,30 @@ def extract_ground_truth(row, df_columns: list) -> dict:
     sac_expansion  = int(diam_diff is not None and diam_diff >= 5.0)
 
     gt_comps = {}
+    comp_timing = {}
     for label, pattern in COMP_PATTERNS.items():
         cols = [c for c in df_columns if re.search(pattern, c)]
-        gt_comps[label] = int(any(is_flagged(row.get(c)) for c in cols))
+        flagged_cols = [c for c in cols if is_flagged(row.get(c))]
+        gt_comps[label] = int(bool(flagged_cols))
+
+        timing = None
+        if flagged_cols:
+            fu_tagged = []
+            for c in flagged_cols:
+                n = _extract_fu_number(c)
+                if n is not None:
+                    fu_tagged.append((c, n))
+            fu_tagged.sort(key=lambda x: x[1])
+            if fu_tagged:
+                _, first_fu = fu_tagged[0]
+                visit_date = _find_visit_date(first_fu, row, df_columns)
+                days = (visit_date - op_date).days if (visit_date and op_date) else None
+                timing = {
+                    "first_fu":    first_fu,
+                    "first_date":  visit_date.isoformat() if visit_date else None,
+                    "days_from_op": days,
+                }
+        comp_timing[label] = timing
 
     return {
         "reintervention":    has_reint,
@@ -303,9 +354,11 @@ def extract_ground_truth(row, df_columns: list) -> dict:
         "sac_stable":        sac_stable,
         "sac_expansion":     sac_expansion,
         "diam_diff":         serialize_value(diam_diff),
+        "diam_mapping":      diam_mapping,
         "has_baseline_diam": bl_val is not None,
         "has_fu_diam":       fu_val is not None,
         **gt_comps,
+        "comp_timing":       comp_timing,
     }
 
 
@@ -500,7 +553,7 @@ def build_multimodal_dataset_v1(
                 },
                 "pre_op_features":  {k: serialize_value(row[k]) for k in pre_op_cols  if k in row},
                 "post_op_features": {k: serialize_value(row[k]) for k in post_op_cols if k in row},
-                "ground_truth":     extract_ground_truth(row, list(df.columns)),
+                "ground_truth":     extract_ground_truth(row, list(df.columns), op_date),
             }
             stats["matched"] += 1
 
@@ -553,7 +606,7 @@ def _print_analysis_report(
     sep     = "-" * sep_len
 
     rprint("\n" + "=" * sep_len)
-    rprint("FINAL MULTI-MODAL DATASET ANALYSIS (v1)")
+    rprint("MULTI-MODAL DATASET ANALYSIS (v1)")
     rprint("=" * sep_len)
     rprint(f"  Patients in session index : {stats['total']}")
     rprint(f"  Matched to SPSS           : {stats['matched']}")
@@ -634,6 +687,34 @@ def _print_analysis_report(
     rprint("* sac_regression / sac_stable / sac_expansion are % of sac_measured, not total")
     rprint("=" * sep_len)
 
+    # ---- Diameter mapping strategy summary table ----
+    _all_mappings = {p["ground_truth"].get("diam_mapping") for p in final_data.values()}
+    _other_mappings = sorted(m for m in _all_mappings if m not in ("CT-CT", "US-US", None))
+    _strategy_order = ["CT-CT", "US-US"] + _other_mappings + [None]
+
+    rprint("\nDIAMETER MAPPING STRATEGY")
+    rprint(sep)
+    rprint(header)
+    rprint(sep)
+    for strategy in _strategy_order:
+        label = strategy if strategy is not None else "None (unmapped)"
+        t_count = sum(1 for p in final_data.values() if p["ground_truth"].get("diam_mapping") == strategy)
+        row = f"{label:{MW}} | {fmt_cell(t_count, total_n)}"
+        for s in sites:
+            s_count = sum(1 for p in site_data[s] if p["ground_truth"].get("diam_mapping") == strategy)
+            row += f" | {fmt_cell(s_count, len(site_data[s]))}"
+        rprint(row)
+    rprint(sep)
+    rprint("Mapping key:")
+    rprint("  CT-CT   : baseline (Bl.*CTA.*AAAdiam) + follow-up (FU.*CTA.*AAAdiam) — same modality")
+    rprint("  US-US   : baseline (Bl.*DUS.*AAAdiam) + follow-up (FU.*DUS.*AAAdiam) — same modality")
+    rprint("  CT-US   : baseline CTA + follow-up DUS (cross-modality fallback)")
+    rprint("  US-CT   : baseline DUS + follow-up CTA (cross-modality fallback)")
+    rprint("  GEN-CT  : baseline from Bl_AAAdiam (modality unknown) + follow-up CTA")
+    rprint("  GEN-US  : same as above but follow-up is DUS")
+    rprint("  None    : no diameter pair could be formed (missing baseline or follow-up)")
+    rprint("=" * sep_len)
+
     fprint("\n" + "=" * sep_len)
     fprint("DATA QUALITY DETAIL — PATIENT IDs")
     fprint("=" * sep_len)
@@ -707,22 +788,65 @@ def _print_analysis_report(
     fprint("=" * sep_len)
 
     fprint("\n" + "=" * sep_len)
+    fprint("DIAMETER MAPPING STRATEGY — PATIENT IDs")
+    fprint("=" * sep_len)
+    fprint("Mapping key:")
+    fprint("  CT-CT   : baseline (Bl.*CTA.*AAAdiam) + follow-up (FU.*CTA.*AAAdiam) — same modality")
+    fprint("  US-US   : baseline (Bl.*DUS.*AAAdiam) + follow-up (FU.*DUS.*AAAdiam) — same modality")
+    fprint("  CT-US   : baseline CTA + follow-up DUS (cross-modality fallback)")
+    fprint("  US-CT   : baseline DUS + follow-up CTA (cross-modality fallback)")
+    fprint("  GEN-CT  : baseline from Bl_AAAdiam (modality unknown) + follow-up CTA")
+    fprint("  GEN-US  : same as above but follow-up is DUS")
+    fprint("  None    : no diameter pair could be formed (missing baseline or follow-up)")
+    _all_mappings_det = {p["ground_truth"].get("diam_mapping") for p in final_data.values()}
+    _other_mappings_det = sorted(m for m in _all_mappings_det if m not in ("CT-CT", "US-US", None))
+    for strategy in ["CT-CT", "US-US"] + _other_mappings_det + [None]:
+        label = strategy if strategy is not None else "None (unmapped)"
+        patients_with = [
+            (k, p["metadata"]["site_short"])
+            for k, p in final_data.items()
+            if p["ground_truth"].get("diam_mapping") == strategy
+        ]
+        by_site_m: dict[str, list] = defaultdict(list)
+        for key, site in patients_with:
+            by_site_m[site].append(key)
+        fprint(f"\n{label} — {len(patients_with)} patient(s)")
+        for site, pids in sorted(by_site_m.items()):
+            fprint(f"  {site} ({len(pids)}): {', '.join(sorted(pids))}")
+        if not patients_with:
+            fprint("  (none)")
+    fprint("=" * sep_len)
+
+    fprint("\n" + "=" * sep_len)
     fprint("GROUND TRUTH METRIC DETAIL — PATIENT IDs")
     fprint("=" * sep_len)
 
+    comp_labels = set(COMP_PATTERNS.keys())
     gt_detail_metrics = [m for m in GT_METRICS if not m.startswith("death")]
     for metric in gt_detail_metrics:
         positive = [
-            (k, p["metadata"]["site_short"])
+            (k, p["metadata"]["site_short"], p["ground_truth"].get("comp_timing", {}).get(metric))
             for k, p in final_data.items()
             if p["ground_truth"].get(metric) == 1
         ]
-        by_site: dict[str, list] = defaultdict(list)
-        for key, site in positive:
-            by_site[site].append(key)
+        by_site_t: dict[str, list] = defaultdict(list)
+        for key, site, timing in positive:
+            by_site_t[site].append((key, timing))
         fprint(f"\n{metric} — {len(positive)} patient(s)")
-        for site, pids in sorted(by_site.items()):
-            fprint(f"  {site} ({len(pids)}): {', '.join(sorted(pids))}")
+        for site, patients in sorted(by_site_t.items()):
+            if metric in comp_labels:
+                fprint(f"  {site} ({len(patients)}):")
+                for key, timing in sorted(patients):
+                    if timing:
+                        date_str = timing.get("first_date") or "no date"
+                        days_str = (f"+{timing['days_from_op']}d"
+                                    if timing.get("days_from_op") is not None else "days n/a")
+                        fprint(f"    {key}: first at FU{timing['first_fu']} ({date_str}, {days_str})")
+                    else:
+                        fprint(f"    {key}: (no FU-prefixed column found)")
+            else:
+                pids = sorted(k for k, _ in patients)
+                fprint(f"  {site} ({len(pids)}): {', '.join(pids)}")
         if not positive:
             fprint("  (none)")
 

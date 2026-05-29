@@ -459,6 +459,80 @@ def _build_loaders_args(tmp_path):
     return splits, config, feature_names, clin_mean, clin_std
 
 
+# ── _make_weighted_sampler ────────────────────────────────────────────────────
+
+
+def _make_sample_list(n_pos: int, n_neg: int) -> list:
+    """Build a minimal train_files list with reintervention_label entries."""
+    import numpy as np
+    samples = []
+    for _ in range(n_pos):
+        samples.append({"reintervention_label": np.array([1.0], dtype=np.float32)})
+    for _ in range(n_neg):
+        samples.append({"reintervention_label": np.array([0.0], dtype=np.float32)})
+    return samples
+
+
+def test_make_weighted_sampler_returns_correct_type():
+    from torch.utils.data import WeightedRandomSampler
+    from src.data.loaders import _make_weighted_sampler
+    sampler = _make_weighted_sampler(_make_sample_list(3, 7))
+    assert isinstance(sampler, WeightedRandomSampler)
+
+
+def test_make_weighted_sampler_count_equals_dataset_length():
+    from src.data.loaders import _make_weighted_sampler
+    samples = _make_sample_list(4, 6)
+    sampler = _make_weighted_sampler(samples)
+    assert sampler.num_samples == len(samples)
+
+
+def test_make_weighted_sampler_positive_weight_equals_one_over_n_pos():
+    from src.data.loaders import _make_weighted_sampler
+    n_pos, n_neg = 3, 7
+    samples = _make_sample_list(n_pos, n_neg)
+    sampler = _make_weighted_sampler(samples)
+    weights = list(sampler.weights.numpy())
+    # first n_pos entries should have weight 1/n_pos
+    assert all(abs(w - 1.0 / n_pos) < 1e-6 for w in weights[:n_pos])
+
+
+def test_make_weighted_sampler_negative_weight_equals_one_over_n_neg():
+    from src.data.loaders import _make_weighted_sampler
+    n_pos, n_neg = 3, 7
+    samples = _make_sample_list(n_pos, n_neg)
+    sampler = _make_weighted_sampler(samples)
+    weights = list(sampler.weights.numpy())
+    assert all(abs(w - 1.0 / n_neg) < 1e-6 for w in weights[n_pos:])
+
+
+# ── get_cached_transforms — transform pipeline contents ───────────────────────
+
+
+def test_cached_transforms_uses_spatial_pad_and_crop():
+    """get_cached_transforms must use SpatialPadd + CenterSpatialCropd, not Resized."""
+    from monai.transforms import CenterSpatialCropd, SpatialPadd
+    from src.data.loaders import get_cached_transforms
+
+    tfm = get_cached_transforms()
+    transform_types = [type(t) for t in tfm.transforms]
+    assert SpatialPadd in transform_types
+    assert CenterSpatialCropd in transform_types
+
+
+def test_cached_transforms_has_no_resized():
+    """Resized must NOT appear in the cached transform pipeline (replaced by pad+crop)."""
+    from monai.transforms import Resized
+    from src.data.loaders import get_cached_transforms
+
+    tfm = get_cached_transforms()
+    transform_types = [type(t) for t in tfm.transforms]
+    assert Resized not in transform_types
+
+
+# ── build_loaders ─────────────────────────────────────────────────────────────
+
+
 @patch("torch.utils.data.DataLoader")
 @patch("src.data.loaders.CacheDataset")
 def test_build_loaders_returns_two_dataloaders(mock_cache, mock_dl, tmp_path):
@@ -476,8 +550,9 @@ def test_build_loaders_returns_two_dataloaders(mock_cache, mock_dl, tmp_path):
 
 @patch("torch.utils.data.DataLoader")
 @patch("src.data.loaders.CacheDataset")
-def test_build_loaders_train_uses_shuffle(mock_cache, mock_dl, tmp_path):
-    """Train DataLoader must use shuffle=True (natural class distribution; pos_weight handles imbalance)."""
+def test_build_loaders_train_uses_sampler(mock_cache, mock_dl, tmp_path):
+    """Train DataLoader must use WeightedRandomSampler (not shuffle) for balanced batches."""
+    from torch.utils.data import WeightedRandomSampler
     from src.data.loaders import build_loaders
     mock_cache.return_value = MagicMock(__len__=lambda s: 4)
     splits, config, feature_names, clin_mean, clin_std = _build_loaders_args(tmp_path)
@@ -487,8 +562,8 @@ def test_build_loaders_train_uses_shuffle(mock_cache, mock_dl, tmp_path):
         base_dir=tmp_path, cache_dir=tmp_path / "cache", batch_size=2,
     )
     train_kwargs = mock_dl.call_args_list[0].kwargs
-    assert "sampler" not in train_kwargs
-    assert train_kwargs.get("shuffle") is True
+    assert isinstance(train_kwargs.get("sampler"), WeightedRandomSampler)
+    assert "shuffle" not in train_kwargs
 
 
 @patch("torch.utils.data.DataLoader")

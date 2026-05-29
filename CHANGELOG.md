@@ -13,6 +13,41 @@ _No unreleased changes._
 
 ---
 
+## [2026-05-29] — F2-score checkpoint; Merlin geometry alignment; complication timing; nnUNet fixes
+
+### Changed
+
+- **Checkpoint criterion: AUC → F2-score** (`trainer.py`). Model is now saved when `val/reint_best_fbeta` (β=2, recall-weighted) improves rather than AUC. Early-stopping patience and epoch log lines updated accordingly. Directly optimises for sensitivity over discrimination — missing a reintervention is clinically far worse than a false alarm.
+- **`WeightedRandomSampler` added** (`loaders.py`). Train DataLoader now draws positives and negatives with equal expected frequency (weight = 1/N_class), producing ~50/50 batches. Replaces the previous `shuffle=True` with natural ~18/82 skew. `pos_weight` stays at 4.58 to encode residual clinical FN-penalty without double-counting the balance.
+- **Image geometry aligned to Merlin's pretrained pipeline** (both experiment YAMLs, `loaders.py`):
+  - `image_size` 128³ → `[224, 224, 160]`
+  - `voxel_spacing` `[1.5, 1.5, 1.5]` → `[1.5, 1.5, 3]` mm
+  - `hu_range` `[-200, 400]` → `[-1000, 1000]` HU
+- **`Resized` → `SpatialPadd` + `CenterSpatialCropd`** (`loaders.py`). Replaces trilinear resize with Merlin's exact preprocessing: zero-pad volumes smaller than the target, then center-crop to exactly 224×224×160. Preserves voxel structure rather than stretching.
+- **Regularisation loosened** (both experiment YAMLs, `reintervention.py`):
+  - `gate_l1_weight` 0.002 → 0.0005 (previous value was zeroing too many of the 241 clinical features)
+  - `label_smoothing` 0.05 → 0.02
+  - Clinical branch Dropout 0.4/0.3 → 0.3/0.2
+  - FiLM clamp 0.15 → 0.3 (doubles the modulation range; allows meaningful cross-modal fusion)
+- **`comp_weight_stage_a`** 0.1 → 0.01 (`v1_with_complications.yaml`). Near-zero during Stage A so the reintervention head warms up cleanly before the 7-task complication gradients are introduced.
+
+### Added
+
+- **`diam_mapping` field** in `ground_truth` output of `03_data_matching_v1.py`. Records which diameter-pairing strategy was used per patient: `CT-CT` (preferred) → `US-US` → cross-modality (`CT-US`, `US-CT`) → `GEN-*` fallback (generic `Bl_AAAdiam` column for older Rijnstate patients). A new **DIAMETER MAPPING STRATEGY** table appears in both the console report and the `_analysis.txt` file, with a legend explaining each code.
+- **Complication timing in `ground_truth`** (`03_data_matching_v1.py`). For each of the 11 complication labels (endoleak types, occlusion, stenosis, kinking, fracture, migration, infection), a `comp_timing` dict is now stored: `{"first_fu": 3, "first_date": "2007-06-12", "days_from_op": 601}`. Determined by finding the earliest FU-prefixed flagged column and resolving its date from `FU{N}_Vas{N}_Fu_VDate_...`. The analysis report now prints per-patient timing lines instead of a flat patient-ID list for complication metrics.
+- **Minimum physical-extent guarantee** in `06_crop_full_body_scans.py`. After the aortic crop, the script now expands the window symmetrically if the axial physical depth is below 480 mm (= 160 slices × 3 mm), ensuring `SpatialPadd` adds minimal zero-padding. Status line now also prints physical depth in mm.
+- **9 new tests** covering `_make_weighted_sampler` (weight correctness, type, count), `get_cached_transforms` pipeline contents (`SpatialPadd` present, `Resized` absent), `val/reint_best_fbeta` key presence and range, and F-beta finite-output check.
+- **`val/reint_best_fbeta` added to required-keys set** in `test_trainer.py` (`test_validate_no_comp_required_keys`).
+
+### Fixed
+
+- **nnUNet cwd crash** (`05_nnUNet_labels_metrics_generation.py`). nnUNet internally `chdir`s during inference; after the first scan's temp dir was deleted by `shutil.rmtree`, the next `multiprocessing.Pool` spawn called `os.getcwd()` on a non-existent path, raising `FileNotFoundError`. Fixed by calling `os.chdir(output_base)` before each `predict_from_files` call to keep the process cwd pinned to a stable directory.
+- **nnUNet missing env-var warnings** (`05_nnUNet_labels_metrics_generation.py`). `nnunetv2` checks `nnUNet_raw`, `nnUNet_preprocessed`, and `nnUNet_results` at import time and prints loud warnings if unset. Since only inference via `initialize_from_trained_model_folder` is used (none of these paths are read), fallback values are now set with `os.environ.setdefault` before the import, suppressing the noise without overriding real values from the environment.
+- Removed stale misleading comment in `losses.py` that claimed `WeightedRandomSampler` was already in use (it was not).
+- All documentation (`architecture.md`, `configuration.md`, `data.md`, `training.md`, `testing.md`, `CLAUDE.md`) updated to reflect new geometry, regularisation values, FiLM clamp, checkpoint criterion, and WeightedRandomSampler.
+
+---
+
 ## [2026-05-28] — Stronger regularisation; per-complication loss weights; preprocessing refinements
 
 ### Changed
