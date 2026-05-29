@@ -4,6 +4,13 @@ Personalized risk prediction for EVAR patients using multi-modal deep learning. 
 
 **Institution:** University of Twente &nbsp;|&nbsp; **W&B project:** `AAA-Reintervention-Risk`
 
+[![CI](https://github.com/MIAGroupUT/ai-for-evar/actions/workflows/ci.yml/badge.svg)](https://github.com/MIAGroupUT/ai-for-evar/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/MIAGroupUT/ai-for-evar/gh-badges/tests.json)](https://github.com/MIAGroupUT/ai-for-evar/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/MIAGroupUT/ai-for-evar/gh-badges/coverage.json)](https://github.com/MIAGroupUT/ai-for-evar/actions/workflows/ci.yml)
+[![Last Commit](https://img.shields.io/github/last-commit/MIAGroupUT/ai-for-evar)](https://github.com/MIAGroupUT/ai-for-evar/commits/main)
+[![Python 3.11](https://img.shields.io/badge/python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
+
 ---
 
 ## Installation

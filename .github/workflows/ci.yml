@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'dev*', 'feature*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+
+      - name: Install CPU PyTorch
+        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+      - name: Install CI dependencies
+        run: pip install -r requirements-ci.txt
+
+      - name: Run tests
+        run: |
+          python -m pytest tests/ -v --tb=short \
+            --cov=src --cov-report=json \
+            --junitxml=junit.xml
+
+      - name: Generate badge JSON
+        if: github.event_name == 'push'
+        run: |
+          python - <<'EOF'
+          import json, math, re, os
+
+          with open("coverage.json") as f:
+              cov = json.load(f)
+          pct = math.floor(cov["totals"]["percent_covered"])
+          cov_color = "brightgreen" if pct >= 80 else "yellow" if pct >= 60 else "red"
+
+          with open("junit.xml") as f:
+              xml = f.read()
+          total    = int(re.search(r'tests="(\d+)"',    xml).group(1))
+          failures = int(re.search(r'failures="(\d+)"', xml).group(1))
+          errors   = int(re.search(r'errors="(\d+)"',   xml).group(1))
+          passed   = total - failures - errors
+          tst_color = "brightgreen" if failures == 0 and errors == 0 else "red"
+
+          os.makedirs(".badges", exist_ok=True)
+          with open(".badges/coverage.json", "w") as f:
+              json.dump({"schemaVersion": 1, "label": "coverage",
+                         "message": f"{pct}%", "color": cov_color}, f)
+          with open(".badges/tests.json", "w") as f:
+              json.dump({"schemaVersion": 1, "label": "tests",
+                         "message": f"{passed}/{total} passed", "color": tst_color}, f)
+
+          print(f"coverage={pct}%  tests={passed}/{total} passed")
+          EOF
+
+      - name: Push badges to gh-badges branch
+        if: github.event_name == 'push'
+        uses: JamesIves/github-pages-deploy-action@v4
+        with:
+          branch: gh-badges
+          folder: .badges
+          commit-message: "ci: update badges"
+          single-commit: true
+          clean: true

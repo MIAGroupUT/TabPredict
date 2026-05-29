@@ -13,7 +13,19 @@ _No unreleased changes._
 
 ---
 
-## [2026-05-29] — F2-score checkpoint; Merlin geometry alignment; complication timing; nnUNet fixes
+## [2026-05-29] — F2-score checkpoint; Merlin geometry; complication timing; nnUNet fixes; CI pipeline; crop script suffix output
+
+### Added
+
+- **`diam_mapping` field** in `ground_truth` output of `03_data_matching_v1.py`. Records which diameter-pairing strategy was used per patient: `CT-CT` (preferred) → `US-US` → cross-modality (`CT-US`, `US-CT`) → `GEN-*` fallback (generic `Bl_AAAdiam` column for older Rijnstate patients). A new **DIAMETER MAPPING STRATEGY** table appears in both the console report and the `_analysis.txt` file, with a legend explaining each code.
+- **Complication timing in `ground_truth`** (`03_data_matching_v1.py`). For each of the 11 complication labels (endoleak types, occlusion, stenosis, kinking, fracture, migration, infection), a `comp_timing` dict is now stored: `{"first_fu": 3, "first_date": "2007-06-12", "days_from_op": 601}`. Determined by finding the earliest FU-prefixed flagged column and resolving its date from `FU{N}_Vas{N}_Fu_VDate_...`. The analysis report now prints per-patient timing lines instead of a flat patient-ID list for complication metrics.
+- **Minimum physical-extent guarantee** in `06_crop_full_body_scans.py`. After the aortic crop, the script now expands the window symmetrically if the axial physical depth is below 480 mm (= 160 slices × 3 mm), ensuring `SpatialPadd` adds minimal zero-padding. Status line now also prints physical depth in mm.
+- **9 new tests** covering `_make_weighted_sampler` (weight correctness, type, count), `get_cached_transforms` pipeline contents (`SpatialPadd` present, `Resized` absent), `val/reint_best_fbeta` key presence and range, and F-beta finite-output check.
+- **`val/reint_best_fbeta` added to required-keys set** in `test_trainer.py` (`test_validate_no_comp_required_keys`).
+- **GitHub Actions CI workflow** (`.github/workflows/ci.yml`). Runs the full 220-test CPU-only pytest suite on every push to `main`, `dev*`, and `feature*` branches and on PRs targeting `main`. On push to `main`, generates `coverage.json` and `tests.json` badge data and deploys them to a `gh-badges` branch via `JamesIves/github-pages-deploy-action`.
+- **`requirements-ci.txt`** — stripped-down dependency list for CI: `torch` (CPU), `monai`, `scikit-learn`, `scipy`, `numpy`, `matplotlib`, `wandb`, `tqdm`, `einops`, `PyYAML`, `pytest`, `pytest-cov`. Excludes CUDA packages, `merlin-vlm`, `peft`, `bitsandbytes`, `nnunetv2`, VTK/PyVista, and other HPC-only dependencies.
+- **Dynamic health badges** in `README.md`: CI pass/fail (GitHub Actions built-in), **tests** (`x/220 passed`), **coverage** (`x%`) via shields.io endpoint reading the `gh-badges` branch, **last commit** via shields.io GitHub API. Plus static **Python 3.11** and **Apache-2.0** badges.
+- **`--suffix` argument** in `06_crop_full_body_scans.py`. Appending e.g. `--suffix _cropped` writes output to `imagesTr_cropped/`, `labelsTr_cropped/`, `distMapsTr_cropped/` instead of overwriting in-place, letting the pipeline produce a cropped derivative without destroying the source data.
 
 ### Changed
 
@@ -30,19 +42,15 @@ _No unreleased changes._
   - Clinical branch Dropout 0.4/0.3 → 0.3/0.2
   - FiLM clamp 0.15 → 0.3 (doubles the modulation range; allows meaningful cross-modal fusion)
 - **`comp_weight_stage_a`** 0.1 → 0.01 (`v1_with_complications.yaml`). Near-zero during Stage A so the reintervention head warms up cleanly before the 7-task complication gradients are introduced.
-
-### Added
-
-- **`diam_mapping` field** in `ground_truth` output of `03_data_matching_v1.py`. Records which diameter-pairing strategy was used per patient: `CT-CT` (preferred) → `US-US` → cross-modality (`CT-US`, `US-CT`) → `GEN-*` fallback (generic `Bl_AAAdiam` column for older Rijnstate patients). A new **DIAMETER MAPPING STRATEGY** table appears in both the console report and the `_analysis.txt` file, with a legend explaining each code.
-- **Complication timing in `ground_truth`** (`03_data_matching_v1.py`). For each of the 11 complication labels (endoleak types, occlusion, stenosis, kinking, fracture, migration, infection), a `comp_timing` dict is now stored: `{"first_fu": 3, "first_date": "2007-06-12", "days_from_op": 601}`. Determined by finding the earliest FU-prefixed flagged column and resolving its date from `FU{N}_Vas{N}_Fu_VDate_...`. The analysis report now prints per-patient timing lines instead of a flat patient-ID list for complication metrics.
-- **Minimum physical-extent guarantee** in `06_crop_full_body_scans.py`. After the aortic crop, the script now expands the window symmetrically if the axial physical depth is below 480 mm (= 160 slices × 3 mm), ensuring `SpatialPadd` adds minimal zero-padding. Status line now also prints physical depth in mm.
-- **9 new tests** covering `_make_weighted_sampler` (weight correctness, type, count), `get_cached_transforms` pipeline contents (`SpatialPadd` present, `Resized` absent), `val/reint_best_fbeta` key presence and range, and F-beta finite-output check.
-- **`val/reint_best_fbeta` added to required-keys set** in `test_trainer.py` (`test_validate_no_comp_required_keys`).
+- **`crop_volume()`** (`06_crop_full_body_scans.py`): added optional `out_path` parameter — writes to that path when provided, otherwise overwrites in-place as before.
+- **`process_scan()` status output** (`06_crop_full_body_scans.py`): single-line status replaced with a structured multi-line block showing input shape, output shape, axial extent in slices and mm, whether the 480 mm minimum-extent floor was enforced, and which output directories were written.
+- **`--input-dir` injection guard** in `06_crop_full_body_scans.py` `__main__` block: changed from `len(sys.argv) == 1` to `"--input-dir" not in sys.argv` so that running with only `--suffix _cropped` still injects the default `INPUT_DIR` correctly.
+- **`prepare_data.sh`**: updated the commented-out step-06 invocation to include explicit `--input-dir` and `--suffix _cropped` arguments, matching the new CLI interface.
 
 ### Fixed
 
 - **nnUNet cwd crash** (`05_nnUNet_labels_metrics_generation.py`). nnUNet internally `chdir`s during inference; after the first scan's temp dir was deleted by `shutil.rmtree`, the next `multiprocessing.Pool` spawn called `os.getcwd()` on a non-existent path, raising `FileNotFoundError`. Fixed by calling `os.chdir(output_base)` before each `predict_from_files` call to keep the process cwd pinned to a stable directory.
-- **nnUNet missing env-var warnings** (`05_nnUNet_labels_metrics_generation.py`). `nnunetv2` checks `nnUNet_raw`, `nnUNet_preprocessed`, and `nnUNet_results` at import time and prints loud warnings if unset. Since only inference via `initialize_from_trained_model_folder` is used (none of these paths are read), fallback values are now set with `os.environ.setdefault` before the import, suppressing the noise without overriding real values from the environment.
+- **nnUNet missing env-var warnings** (`05_nnUNet_labels_metrics_generation.py`). `nnunetv2` checks `nnUNet_raw`, `nnUNet_preprocessed`, and `nnUNet_results` at import time and prints loud warnings if unset. Fallback values are now set with `os.environ.setdefault` before the import, suppressing the noise without overriding real environment values.
 - Removed stale misleading comment in `losses.py` that claimed `WeightedRandomSampler` was already in use (it was not).
 - All documentation (`architecture.md`, `configuration.md`, `data.md`, `training.md`, `testing.md`, `CLAUDE.md`) updated to reflect new geometry, regularisation values, FiLM clamp, checkpoint criterion, and WeightedRandomSampler.
 

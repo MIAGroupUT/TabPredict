@@ -1,0 +1,17 @@
+# CI-only dependencies — CPU subset of requirements.txt
+# torch is installed separately in .github/workflows/ci.yml via the CPU wheel index
+
+monai==1.5.2
+SimpleITK==2.5.4
+nibabel==5.4.0
+scikit-learn==1.8.0
+scipy==1.17.1
+numpy==1.26.4
+matplotlib==3.10.8
+wandb==0.26.1
+tqdm==4.67.3
+einops==0.8.2
+PyYAML==6.0.3
+packaging==25.0
+pytest==9.0.3
+pytest-cov==6.0.0

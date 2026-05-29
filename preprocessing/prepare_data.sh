@@ -47,7 +47,8 @@ srun -u $HOME/.conda/envs/ai4evar/bin/python -m 05_nnUNet_labels_metrics_generat
     --output-dir "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v2" \
     --checkpoint-dir "/deepstore/datasets/mia/AI4EVAR/nnUNet/nnUNet_results/Dataset001_AAA_RADAR" \
     --device "cuda"
-# srun -u $HOME/.conda/envs/ai4evar/bin/python -m 06_crop_full_body_scans #--dry-run
+# srun -u $HOME/.conda/envs/ai4evar/bin/python -m 06_crop_full_body_scans --input-dir /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v2 \
+#     --suffix _cropped #--dry-run
 # srun -u $HOME/.conda/envs/ai4evar/bin/python -m 07_generate_data_split 
 
 echo $'\n--------------SLURM JOB FINISHED-----------------'
