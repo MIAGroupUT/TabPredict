@@ -1,0 +1,73 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Ablation: clinical + AAA metrics only — CTA branch disabled.
+#
+# Purpose: quantify how much (if anything) the frozen Merlin visual backbone
+# contributes.  XAI on the full model showed CTA modality importance of
+# 0.002–0.20 (often <0.05), suggesting it may be adding noise rather than
+# signal.  If this ablation matches or beats the full model AUC we need to
+# rethink the visual architecture before investing in Stage B adaptation.
+#
+# Changes vs v1_no_complications:
+#   - disable_cta: true        (CTA zeroed in train + val + test)
+#   - Stage B removed          (adapting the CTA backbone is pointless)
+#   - Stage A patience: 20     (more epochs since no image I/O bottleneck)
+#   - modality_dropout p_cta: 0.0  (redundant with disable_cta, but explicit)
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: v1_no_complications_ablation_no_cta
+version: 1
+description: >
+  CTA ablation: clinical features + AAA geometry metrics only.
+  The visual backbone is zeroed out everywhere (train, val, test) to measure
+  its true contribution to reintervention prediction.
+
+model:
+  with_complications: false
+  complications: []
+  aaa_dim: 5
+
+training:
+  seed: 3299
+  batch_size: 8
+  num_workers: 8
+  image_size: [224, 224, 160]
+  voxel_spacing: [1.5, 1.5, 3]
+  hu_range: [-1000, 1000]
+  train_cache_rate: 0.5
+  val_cache_rate: 1.0
+
+  disable_cta: true            # zero CTA tensor everywhere; skip Stage B
+
+  # Loss hyperparameters — identical to v1_no_complications
+  focal_gamma: 2.0
+  label_smoothing: 0.02
+  pos_weight: 1.0
+  gate_l1_weight: 0.0005
+  recall_beta: 2.0
+  threshold_recall_target: 0.80
+
+  modality_dropout:
+    p_cta: 0.0                 # already always zero; no stochastic dropout needed
+    p_aaa_given_cta: 0.15
+    p_aaa_given_clin: 0.15
+    p_clinical: 0.15
+
+  xai_every_n_epochs: 3
+  xai_samples: 4
+  xai_gradcam: false           # GradCAM meaningless with zeroed CTA
+
+  stages:
+    - name: A
+      epochs: 80
+      patience: 20
+      T_0: 20
+
+paths:
+  base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
+  checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_no_complications_ablation_no_cta
+  cache_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/monai_cache
+
+wandb:
+  project: AAA-Reintervention-Risk
+  run_name: v1_no_complications_ablation_no_cta
+  mode: online

@@ -90,7 +90,9 @@ def run_test(
     # Complications come from checkpoint (authoritative) or fall back to config
     complications = ckpt.get("complications") or list(cfg["model"].get("complications") or [])
 
+    disable_cta = bool(cfg.get("training", {}).get("disable_cta", False))
     log(f"Threshold  : {threshold:.4f}  (from checkpoint)")
+    log(f"Disable CTA: {disable_cta}")
     log(f"Clin feats : {len(feature_names)}")
     log(f"Complic.   : {complications or 'none'}\n")
 
@@ -139,6 +141,8 @@ def run_test(
         aaa  = batch["aaa_metrics"].to(DEVICE).float()
         gt   = int(batch["reintervention_label"].item())
 
+        if disable_cta:
+            cta = torch.zeros_like(cta)
         with torch.no_grad():
             outputs = model(cta, clin, aaa)
         prob = float(torch.sigmoid(outputs[0]).item())

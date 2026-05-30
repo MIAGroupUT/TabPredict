@@ -9,7 +9,21 @@ Entries are grouped by push milestone (no formal version tags yet).
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Added
+
+- **`experiments/v1_no_complications_ablation_no_cta.yaml`** — new ablation config that trains on clinical features + AAA geometry only (CTA branch permanently zeroed). Motivated by XAI analysis showing CTA modality importance of 0.002–0.20 across test patients, suggesting the frozen Merlin backbone may add noise rather than signal. Runs Stage A only (80 epochs, patience 20); `xai_gradcam: false` since GradCAM is meaningless with zeroed input.
+- **`disable_cta` flag** (`training.disable_cta: true`) in experiment configs. When set, the CTA tensor is zeroed before every forward pass in training, validation, and test — not just during modality dropout. Supported in `trainer.py` (`run_pipeline`, `validate`) and `runner.py` (`run_test`).
+- **`threshold_recall_target`** config key (default `0.80`). Checkpoints now save the largest val threshold achieving ≥`threshold_recall_target` recall, instead of the F2-optimal threshold. With only 9 val positives the F2-optimal threshold is volatile; a recall-targeting threshold is more stable and transfers better to test. The saved value is logged as `val/reint_recall_thresh` to W&B and printed in the checkpoint line as `thresh=X.XXX@80%rec`.
+
+### Fixed
+
+- **Double imbalance correction** in both experiment configs: `pos_weight: 4.58 → 1.0`. `WeightedRandomSampler` already creates ~50/50 balanced batches; applying `pos_weight=4.58` on top gave positives ~21× more loss emphasis than the data warrants. This inflated the model's output probabilities for training-set positive patterns, anchoring the val threshold at ~0.57 — which then failed catastrophically on test (recall 0.15 at that threshold vs 0.95 at threshold 0.25).
+
+### Changed
+
+- **`p_clinical: 0.30 → 0.15`** in both experiment configs. 30% clinical feature dropout is overly aggressive when the training set contains only ~37 positives; the model needs more stable clinical signal to learn reliable reintervention patterns.
+- **`v1_with_complications` Stage A `patience: 12 → 20`**. The previous run hit early stopping at epoch 15 with val AUC 0.656 — well below the no-complications model's 0.807 at epoch 33. The multi-task complication head adds gradient noise and needs more epochs to converge.
+- **`preprocessing/prepare_data.sh`** — active SLURM step switched from step 05 (nnUNet labels + metrics generation) to step 06 (full-body crop); log file names updated accordingly.
 
 ---
 

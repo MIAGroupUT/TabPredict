@@ -57,6 +57,8 @@ def validate(
     size: tuple[int, int, int] = (128, 128, 128),
     batch_size: int = 8,
     recall_beta: float = 1.0,
+    threshold_recall_target: float = 0.80,
+    disable_cta: bool = False,
 ) -> tuple[float, dict]:
     """Evaluate on val split; return (avg_loss, metrics_dict)."""
     model.eval()
@@ -72,6 +74,8 @@ def validate(
             aaa  = batch["aaa_metrics"].to(DEVICE).float()
             reint_gt = batch["reintervention_label"].to(DEVICE).float()
 
+            if disable_cta:
+                cta = torch.zeros_like(cta)
             outputs = model(cta, clin, aaa)
             reint_logit, reint_logvar = outputs[0], outputs[1]
 
@@ -103,6 +107,11 @@ def validate(
     best_thresh  = float(t_c[best_idx])
     reint_pred   = (reint_p > best_thresh).astype(int)
 
+    # Recall-targeting threshold: largest t where recall >= threshold_recall_target on val.
+    # More stable than F-beta on small val sets, and transfers better to test.
+    mask = r_c[:-1] >= threshold_recall_target
+    recall_thresh = float(t_c[mask][-1]) if mask.any() else float(t_c[0])
+
     tn, fp, fn, tp = confusion_matrix(reint_g, reint_pred, labels=[0, 1]).ravel()
 
     metrics = {
@@ -114,6 +123,7 @@ def validate(
         "val/reint_accuracy":    float(accuracy_score(reint_g, reint_pred)),
         "val/reint_best_fbeta":  float(f_beta[best_idx]),
         "val/reint_best_thresh": best_thresh,
+        "val/reint_recall_thresh": recall_thresh,
         "val/recall_beta":       recall_beta,
         "val/mean_uncertainty":  float(reint_lv.mean()),
         "val/reint_TP": int(tp), "val/reint_FP": int(fp),
@@ -380,7 +390,9 @@ def run_pipeline(cfg: dict) -> None:
     xai_every    = cfg["training"].get("xai_every_n_epochs", 10)
     xai_samples  = cfg["training"].get("xai_samples", 4)
     xai_gradcam  = cfg["training"].get("xai_gradcam", False)
-    recall_beta  = cfg["training"].get("recall_beta", 1.0)
+    recall_beta             = cfg["training"].get("recall_beta", 1.0)
+    threshold_recall_target = cfg["training"].get("threshold_recall_target", 0.80)
+    disable_cta             = cfg["training"].get("disable_cta", False)
 
     # ── stage loop ────────────────────────────────────────────────────────────
     for stage_cfg in cfg["training"]["stages"]:
@@ -424,6 +436,8 @@ def run_pipeline(cfg: dict) -> None:
                 aaa  = batch["aaa_metrics"].to(DEVICE).float()
                 cta  = batch.get("cta", torch.zeros(batch_size, 4, *size)).to(DEVICE).float()
 
+                if disable_cta:
+                    cta = torch.zeros_like(cta)
                 if apply_dropout:
                     cta, clin, aaa = maybe_apply_modality_dropout(
                         model.training, cta, clin, aaa,
@@ -464,6 +478,8 @@ def run_pipeline(cfg: dict) -> None:
             val_loss, val_metrics = validate(
                 model, val_loader, criterion, complications, size, batch_size,
                 recall_beta=recall_beta,
+                threshold_recall_target=threshold_recall_target,
+                disable_cta=disable_cta,
             )
             _log_detailed_metrics(st, epoch, train_loss / len(train_loader),
                                    val_loss, last_loss_dict, opt)
@@ -500,7 +516,7 @@ def run_pipeline(cfg: dict) -> None:
                 torch.save(
                     {
                         "state_dict":    get_model(model).state_dict(),
-                        "threshold":     val_metrics.get("val/reint_best_thresh", 0.5),
+                        "threshold":     val_metrics.get("val/reint_recall_thresh", 0.5),
                         "feature_names": feature_names,
                         "clin_mean":     clin_mean.tolist(),
                         "clin_std":      clin_std.tolist(),
@@ -513,7 +529,8 @@ def run_pipeline(cfg: dict) -> None:
                     f"  ✓ Checkpoint saved "
                     f"(F{recall_beta:.0f}={best_val_fbeta:.4f}, "
                     f"AUC={val_metrics.get('val/reint_auc', 0):.4f}, "
-                    f"rec={val_metrics.get('val/reint_recall', 0):.4f})"
+                    f"rec={val_metrics.get('val/reint_recall', 0):.4f}, "
+                    f"thresh={val_metrics.get('val/reint_recall_thresh', 0):.3f}@{threshold_recall_target:.0%}rec)"
                 )
             else:
                 patience_counter += 1

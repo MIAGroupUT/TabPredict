@@ -34,16 +34,17 @@ training:
   # Loss hyperparameters
   focal_gamma: 2.0
   label_smoothing: 0.02
-  pos_weight: 4.58           # raw N_neg/N_pos ratio; sampler already balances batches 50/50
+  pos_weight: 1.0            # WRS already balances batches 50/50; no double-correction
   gate_l1_weight: 0.0005     # gentle sparsity; 0.002 was zeroing too many features
   recall_beta: 2.0           # checkpoint saved by F2-score (recall-weighted)
+  threshold_recall_target: 0.80  # threshold saved = smallest t giving ≥80% recall on val
 
   # Causal modality dropout — applied in BOTH Stage A and Stage B
   modality_dropout:
     p_cta: 0.10
     p_aaa_given_cta: 0.15
     p_aaa_given_clin: 0.15
-    p_clinical: 0.30         # was 0.20; also active in Stage A now
+    p_clinical: 0.15         # 0.30 too aggressive with only ~37 train positives
 
   xai_every_n_epochs: 3
   xai_samples: 4
