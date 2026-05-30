@@ -9,6 +9,12 @@ Entries are grouped by push milestone (no formal version tags yet).
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+---
+
+## [2026-05-30] — Fix double pos_weight; recall-threshold checkpoint; CTA-ablation config
+
 ### Added
 
 - **`experiments/v1_no_complications_ablation_no_cta.yaml`** — new ablation config that trains on clinical features + AAA geometry only (CTA branch permanently zeroed). Motivated by XAI analysis showing CTA modality importance of 0.002–0.20 across test patients, suggesting the frozen Merlin backbone may add noise rather than signal. Runs Stage A only (80 epochs, patience 20); `xai_gradcam: false` since GradCAM is meaningless with zeroed input.
