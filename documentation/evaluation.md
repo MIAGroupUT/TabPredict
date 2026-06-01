@@ -55,14 +55,12 @@ sbatch --job-name=test_no_comp scripts/submit_slurm.sh test \
   "reintervention_pred": 1,
   "reintervention_gt":   1,
   "label_type":          "TP",
-  "threshold":           0.52,
-  "logvar":             -1.3
+  "threshold":           0.52
 }
 ```
 
 - `label_type` — one of `"TP"`, `"FP"`, `"TN"`, `"FN"`
 - `threshold` — the F-beta optimal threshold loaded from the checkpoint
-- `logvar` — raw log-variance output (lower = more confident)
 
 ### `xai.json`
 
@@ -136,13 +134,13 @@ When `threshold_used` and `best_threshold` differ significantly on the test set,
 
 ### Confidence Levels
 
-| Level | Condition |
-|---|---|
-| `HIGH` | `1 / (1 + σ) ≥ 0.75` |
-| `MED` | `1 / (1 + σ) ≥ 0.50` |
-| `LOW` | `1 / (1 + σ) < 0.50` |
+Confidence is self-calibrating: `conf = 2 × |prob − 0.5|`, ranging from 0 (maximally uncertain, prob≈0.5) to 1 (certain, prob near 0 or 1).
 
-Where σ = `exp(0.5 × logvar)`.
+| Level | Condition | Example prob |
+|---|---|---|
+| `HIGH` | `conf > 0.60` | prob < 0.20 or prob > 0.80 |
+| `MED` | `conf > 0.30` | prob < 0.35 or prob > 0.65 |
+| `LOW` | `conf ≤ 0.30` | prob in (0.35, 0.65) |
 
 Low-confidence predictions should be flagged for clinical review regardless of the binary prediction.
 

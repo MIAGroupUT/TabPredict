@@ -20,8 +20,8 @@ result = xai.full_explain(cta, clin, aaa)
 | Key | Type | Description |
 |---|---|---|
 | `reintervention_prob` | float | Reintervention probability, `sigmoid(logit)` |
-| `reintervention_confidence` | float | `1 / (1 + σ)` where σ = `exp(0.5 × logvar)` |
-| `confidence_level` | str | `"HIGH"` (≥0.75), `"MED"` (≥0.50), `"LOW"` (<0.50) |
+| `reintervention_confidence` | float | `2 × \|prob − 0.5\|` — 0 when uncertain (prob≈0.5), 1 when certain (prob near 0 or 1) |
+| `confidence_level` | str | `"HIGH"` (>0.60), `"MED"` (>0.30), `"LOW"` (≤0.30) |
 | `clinical_importance` | list of (name, score, level) | Top-20 clinical features by gradient magnitude |
 | `aaa_importance` | list of (name, score, level) | All 5 AAA geometry metrics, normalised |
 | `modality_importance` | dict | CTA / Clinical / AAA_metrics ablation fractions (sum to 1.0) |

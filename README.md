@@ -72,7 +72,7 @@ ai4evar/
 │   ├── xai/              # Gradient-based explainability
 │   └── evaluation/       # Metrics + per-patient output
 ├── preprocessing/        # Data preparation scripts (00–06)
-├── tests/                # CPU-only pytest suite (220 tests)
+├── tests/                # CPU-only pytest suite (259 tests)
 └── documentation/        # Detailed technical documentation
 ```
 

@@ -44,7 +44,7 @@ All metrics are logged at the end of each validation epoch.
 | `val/reint_recall` | Recall (sensitivity) at current threshold |
 | `val/reint_accuracy` | Accuracy at current threshold |
 | `val/reint_best_thresh` | Optimal F-beta (β=2) threshold on this epoch's val set |
-| `val/mean_uncertainty` | Mean predicted uncertainty (`exp(0.5 × logvar)`) across val patients |
+| `val/mean_confidence` | Mean `2×\|prob−0.5\|` across val patients (0 = uncertain, 1 = certain) |
 | `val/reint_TP` / `val/reint_FP` / `val/reint_TN` / `val/reint_FN` | Confusion matrix |
 | `val/reint_TPR` / `val/reint_TNR` / `val/reint_FPR` / `val/reint_FNR` | Derived rates |
 
@@ -62,11 +62,10 @@ All metrics are logged at the end of each validation epoch.
 | `metrics/loss_total` | Batch total loss |
 | `metrics/loss_reint` | Reintervention component |
 | `metrics/loss_comp` | Complication component (multi-task only) |
-| `metrics/mean_uncertainty` | Batch mean uncertainty |
 
 ### Learning Rates (`lr/` prefix)
 
-One entry per optimizer parameter group (e.g. `lr/clinical`, `lr/lora`, `lr/feature_gate`). Useful for verifying the cosine schedule is working correctly.
+One entry per optimizer parameter group (e.g. `lr/clinical`, `lr/i3resnet_bn`, `lr/feature_gate`, `lr/cta_adapter`). Useful for verifying the cosine schedule is working correctly.
 
 ### Stage Loss (`stage_A/` or `stage_B/` prefix)
 

@@ -261,9 +261,10 @@ def test_build_optimizer_stage_a_with_comp_group_count(fresh_model_with_comp):
 
 
 def test_build_optimizer_stage_b_group_count(fresh_model_no_comp):
-    from src.training.stages import build_optimizer
+    from src.training.stages import build_optimizer, set_stage_b
+    set_stage_b(fresh_model_no_comp)
     opt = build_optimizer(fresh_model_no_comp, "B")
-    assert len(opt.param_groups) == 9  # tabular + cta_adapter + visual_proj + i3resnet_bn + head
+    assert len(opt.param_groups) == 10  # tabular + cta_adapter + visual_proj + i3resnet_bn + i3resnet_layer4 + head
 
 
 def test_build_optimizer_stage_b_i3resnet_bn_lr(fresh_model_no_comp):

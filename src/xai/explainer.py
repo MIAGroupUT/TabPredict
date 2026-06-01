@@ -65,10 +65,10 @@ class ReinterventionXAI:
         with torch.no_grad():
             outputs = self.model(cta, clin, aaa)
 
-        reint_logit, reint_logvar = outputs[0], outputs[1]
-        reint_prob = float(torch.sigmoid(reint_logit).item())
-        reint_std  = float(torch.exp(0.5 * reint_logvar).item())
-        reint_conf = 1.0 / (1.0 + reint_std)
+        reint_logit = outputs[0]
+        reint_prob  = float(torch.sigmoid(reint_logit).item())
+        # Confidence = distance from 0.5: 0 when maximally uncertain, 1 when certain.
+        reint_conf  = 2.0 * abs(reint_prob - 0.5)
 
         result: dict = {
             "reintervention_prob":       round(reint_prob, 4),
@@ -77,13 +77,11 @@ class ReinterventionXAI:
         }
 
         if self.complications:
-            comp_probs_t  = torch.sigmoid(outputs[2]).squeeze().cpu().numpy()
-            comp_logvar_t = outputs[3].squeeze().cpu().numpy()
+            comp_probs_t = torch.sigmoid(outputs[1]).squeeze().cpu().numpy()
             comp_prob_dict, comp_conf_dict = {}, {}
             for i, name in enumerate(self.complications):
-                p  = float(comp_probs_t[i] if comp_probs_t.ndim > 0 else comp_probs_t)
-                lv = float(comp_logvar_t[i] if comp_logvar_t.ndim > 0 else comp_logvar_t)
-                c  = 1.0 / (1.0 + float(np.exp(0.5 * lv)))
+                p = float(comp_probs_t[i] if comp_probs_t.ndim > 0 else comp_probs_t)
+                c = 2.0 * abs(p - 0.5)
                 comp_prob_dict[name] = round(p, 4)
                 comp_conf_dict[name] = self._conf_level(c)
             result["complication_probs"]      = comp_prob_dict
@@ -308,8 +306,9 @@ class ReinterventionXAI:
     # ── internal helpers ──────────────────────────────────────────────────────
 
     def _conf_level(self, conf: float) -> str:
-        if conf > 0.75: return "HIGH"
-        if conf > 0.55: return "MED"
+        """conf = 2*|prob - 0.5|, ranges 0 (uncertain) to 1 (certain)."""
+        if conf > 0.6: return "HIGH"
+        if conf > 0.3: return "MED"
         return "LOW"
 
     def _get_i3res(self) -> nn.Module | None:

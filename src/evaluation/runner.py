@@ -153,7 +153,7 @@ def run_test(
 
         comp_probs_arr: np.ndarray | None = None
         if with_comp:
-            comp_probs_arr = torch.sigmoid(outputs[2]).cpu().numpy().flatten()
+            comp_probs_arr = torch.sigmoid(outputs[1]).cpu().numpy().flatten()
             comp_gt_arr    = batch["complication_labels"].cpu().numpy().flatten()
             all_comp_probs.append(comp_probs_arr)
             all_comp_gt.append(comp_gt_arr)
@@ -165,7 +165,6 @@ def run_test(
             "reintervention_gt":    gt,
             "label_type":           label_type(pred, gt),
             "threshold":            round(threshold, 4),
-            "reint_logvar":         round(float(outputs[1].item()), 4),
         }
         if with_comp and comp_probs_arr is not None:
             pred_info["complication_probs"] = {

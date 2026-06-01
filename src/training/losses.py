@@ -1,13 +1,12 @@
 """
 Loss functions for the reintervention risk models.
 
-ReinterventionLoss           — heteroscedastic focal BCE for the primary task.
+ReinterventionLoss           — focal BCE for the primary task.
 MultiTaskReinterventionLoss  — same primary loss + masked per-complication loss.
 
-Both use heteroscedastic NLL weighting with a KL-style symmetric prior:
-    loss = exp(-logvar) * focal_bce + 0.5 * (exp(logvar) - 1 - logvar)
-The prior has its minimum at logvar=0 and prevents calibration collapse
-(logvar drifting to the clamp boundary, making train loss negative).
+Plain focal BCE with class-imbalance correction via pos_weight.
+Label smoothing (ε=0.02) and focal modulation (γ=3.0) focus gradient
+on hard, uncertain examples and prevent overconfident predictions.
 """
 
 from __future__ import annotations
@@ -26,7 +25,7 @@ def _focal_bce_per_sample(
     label_smoothing: float = 0.05,
     pos_weight: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    """Per-sample focal BCE, keeping the (B, 1) shape for heteroscedastic weighting."""
+    """Per-sample focal BCE, shape (B, 1)."""
     smooth_gt = gt * (1 - label_smoothing) + 0.5 * label_smoothing
     bce = F.binary_cross_entropy_with_logits(
         logit, smooth_gt, pos_weight=pos_weight, reduction="none"
@@ -36,35 +35,10 @@ def _focal_bce_per_sample(
     return (1 - pt).pow(focal_gamma) * bce
 
 
-def _heteroscedastic(
-    logit: torch.Tensor,
-    logvar: torch.Tensor,
-    gt: torch.Tensor,
-    focal_gamma: float = 2.0,
-    label_smoothing: float = 0.05,
-    pos_weight: torch.Tensor | None = None,
-) -> torch.Tensor:
-    """Heteroscedastic focal loss for one task. Returns a scalar.
-
-    Uses a KL-style symmetric prior instead of the plain 0.5*logvar entropy term.
-    0.5*(exp(logvar) - 1 - logvar) has its minimum at logvar=0 and penalises
-    both logvar→+inf (exponential) and logvar→-inf (linear -logvar dominates).
-    When train BCE→0 the optimal logvar→0, so train loss cannot go negative
-    and the precision amplifier stays near 1× on memorised training samples.
-    """
-    bce       = _focal_bce_per_sample(logit, gt, focal_gamma, label_smoothing, pos_weight)
-    logvar_c  = logvar.clamp(-4.0, 2.0)
-    precision = torch.exp(-logvar_c)
-    return (precision * bce).mean() + 0.5 * (logvar.exp() - 1 - logvar).mean()
-
-
 # ── primary-task-only loss ────────────────────────────────────────────────────
 
 class ReinterventionLoss(nn.Module):
-    """
-    For the no-complications model variant.
-    Class imbalance is handled via pos_weight in the loss (no sampler in the dataloader).
-    """
+    """For the no-complications model variant."""
 
     def __init__(
         self,
@@ -81,18 +55,16 @@ class ReinterventionLoss(nn.Module):
     def forward(
         self,
         reint_logit: torch.Tensor,
-        reint_logvar: torch.Tensor,
         reint_gt: torch.Tensor,
     ) -> tuple[torch.Tensor, dict]:
         reint_gt_v = reint_gt.view_as(reint_logit)
-        loss = _heteroscedastic(
-            reint_logit, reint_logvar, reint_gt_v,
+        loss = _focal_bce_per_sample(
+            reint_logit, reint_gt_v,
             self.focal_gamma, self.label_smoothing, self.pos_weight_buf,
-        )
+        ).mean()
         return loss, {
-            "loss_total":       loss.item(),
-            "loss_reint":       loss.item(),
-            "mean_uncertainty": reint_logvar.mean().item(),
+            "loss_total": loss.item(),
+            "loss_reint": loss.item(),
         }
 
 
@@ -139,17 +111,15 @@ class MultiTaskReinterventionLoss(nn.Module):
     def forward(
         self,
         reint_logit: torch.Tensor,
-        reint_logvar: torch.Tensor,
         comp_logits: torch.Tensor,
-        comp_logvar: torch.Tensor,
         reint_gt: torch.Tensor,
         comp_gt: torch.Tensor,
     ) -> tuple[torch.Tensor, dict]:
         # Primary task
-        loss_reint = _heteroscedastic(
-            reint_logit, reint_logvar, reint_gt.view_as(reint_logit),
+        loss_reint = _focal_bce_per_sample(
+            reint_logit, reint_gt.view_as(reint_logit),
             self.focal_gamma, self.label_smoothing, self.pos_weight_reint,
-        )
+        ).mean()
 
         # Per-complication, masked for unknown labels; weighted sum
         comp_losses: list[torch.Tensor] = []
@@ -162,13 +132,12 @@ class MultiTaskReinterventionLoss(nn.Module):
                 self.comp_pos_weight_buf[c:c+1]
                 if self.comp_pos_weight_buf is not None else None
             )
-            loss_c = _heteroscedastic(
+            loss_c = _focal_bce_per_sample(
                 comp_logits[valid, c].unsqueeze(1),
-                comp_logvar[valid, c].unsqueeze(1),
                 comp_gt[valid, c].unsqueeze(1),
                 self.focal_gamma, self.label_smoothing,
                 pos_weight=pw,
-            )
+            ).mean()
             w = self.comp_loss_weights[c] if self.comp_loss_weights is not None else 1.0
             comp_losses.append(loss_c * w)
             weights_used.append(w)
@@ -181,8 +150,7 @@ class MultiTaskReinterventionLoss(nn.Module):
         total = loss_reint + self.comp_weight * loss_comp
 
         return total, {
-            "loss_total":       total.item(),
-            "loss_reint":       loss_reint.item(),
-            "loss_comp":        loss_comp.item(),
-            "mean_uncertainty": reint_logvar.mean().item(),
+            "loss_total": total.item(),
+            "loss_reint": loss_reint.item(),
+            "loss_comp":  loss_comp.item(),
         }

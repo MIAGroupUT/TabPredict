@@ -64,8 +64,8 @@ def validate(
     model.eval()
     with_comp = bool(complications)
     val_loss  = 0.0
-    all_reint_probs, all_reint_gt, all_reint_lv = [], [], []
-    all_comp_probs, all_comp_gt = [], []
+    all_reint_probs, all_reint_gt = [], []
+    all_comp_probs, all_comp_gt   = [], []
 
     with torch.no_grad():
         for batch in val_loader:
@@ -77,27 +77,23 @@ def validate(
             if disable_cta:
                 cta = torch.zeros_like(cta)
             outputs = model(cta, clin, aaa)
-            reint_logit, reint_logvar = outputs[0], outputs[1]
+            reint_logit = outputs[0]
 
             if with_comp:
-                comp_gt      = batch["complication_labels"].to(DEVICE).float()
-                comp_logits, comp_logvar = outputs[2], outputs[3]
-                loss, _      = criterion(reint_logit, reint_logvar,
-                                         comp_logits, comp_logvar,
-                                         reint_gt, comp_gt)
+                comp_gt     = batch["complication_labels"].to(DEVICE).float()
+                comp_logits = outputs[1]
+                loss, _     = criterion(reint_logit, comp_logits, reint_gt, comp_gt)
                 all_comp_probs.append(torch.sigmoid(comp_logits).cpu())
                 all_comp_gt.append(comp_gt.cpu())
             else:
-                loss, _ = criterion(reint_logit, reint_logvar, reint_gt)
+                loss, _ = criterion(reint_logit, reint_gt)
 
             val_loss += loss.item()
             all_reint_probs.append(torch.sigmoid(reint_logit).cpu())
             all_reint_gt.append(reint_gt.cpu())
-            all_reint_lv.append(reint_logvar.cpu())
 
-    reint_p  = torch.cat(all_reint_probs).numpy().flatten()
-    reint_g  = torch.cat(all_reint_gt).numpy().flatten().astype(int)
-    reint_lv = torch.cat(all_reint_lv).numpy().flatten()
+    reint_p = torch.cat(all_reint_probs).numpy().flatten()
+    reint_g = torch.cat(all_reint_gt).numpy().flatten().astype(int)
 
     # Optimal F-beta threshold via PR curve (beta>1 weights recall over precision)
     p_c, r_c, t_c = precision_recall_curve(reint_g, reint_p)
@@ -125,7 +121,6 @@ def validate(
         "val/reint_best_thresh": best_thresh,
         "val/reint_recall_thresh": recall_thresh,
         "val/recall_beta":       recall_beta,
-        "val/mean_uncertainty":  float(reint_lv.mean()),
         "val/reint_TP": int(tp), "val/reint_FP": int(fp),
         "val/reint_TN": int(tn), "val/reint_FN": int(fn),
         "val/reint_TPR": tp / (tp + fn) if (tp + fn) > 0 else 0.0,
@@ -156,8 +151,7 @@ def validate(
         f"f1={metrics['val/reint_f1']:.4f} | "
         f"prec={metrics['val/reint_precision']:.4f} | "
         f"rec={metrics['val/reint_recall']:.4f} | "
-        f"thresh={metrics['val/reint_best_thresh']:.3f} | "
-        f"unc={metrics['val/mean_uncertainty']:.4f}"
+        f"thresh={metrics['val/reint_best_thresh']:.3f}"
         + (f" | comp_mAUC={metrics.get('val/comp_mean_auc', 0.0):.4f}" if with_comp else "")
     )
     return val_loss / len(val_loader), metrics
@@ -196,7 +190,7 @@ def log_val_table(
             probs    = torch.sigmoid(outputs[0]).cpu().numpy().flatten()
             reint_gt = batch["reintervention_label"].cpu().numpy().flatten()
 
-            comp_probs = torch.sigmoid(outputs[2]).cpu().numpy() if with_comp else None
+            comp_probs = torch.sigmoid(outputs[1]).cpu().numpy() if with_comp else None
             comp_gt    = batch["complication_labels"].cpu().numpy() if with_comp else None
 
             for i in range(len(probs)):
@@ -311,9 +305,7 @@ def run_pipeline(cfg: dict) -> None:
     set_all_seeds(seed)
 
     base_dir      = Path(cfg["paths"]["base_dir"])
-    cache_dir     = Path(cfg["paths"]["cache_dir"])
     checkpoint_dir = Path(cfg["paths"]["checkpoint_dir"])
-    cache_dir.mkdir(exist_ok=True, parents=True)
     checkpoint_dir.mkdir(exist_ok=True, parents=True)
 
     complications = list(cfg["model"].get("complications") or [])
@@ -330,7 +322,7 @@ def run_pipeline(cfg: dict) -> None:
 
     train_loader, val_loader = build_loaders(
         splits, config, feature_names, clin_mean, clin_std,
-        base_dir=base_dir, cache_dir=cache_dir,
+        base_dir=base_dir,
         batch_size=batch_size, num_workers=num_workers,
         complications=complications,
         train_cache_rate=cfg["training"].get("train_cache_rate", 0.5),
@@ -451,18 +443,16 @@ def run_pipeline(cfg: dict) -> None:
 
                 opt.zero_grad()
                 with torch.cuda.amp.autocast():
-                    outputs      = model(cta=cta, clin=clin, aaa=aaa)
-                    reint_logit, reint_logvar = outputs[0], outputs[1]
+                    outputs     = model(cta=cta, clin=clin, aaa=aaa)
+                    reint_logit = outputs[0]
 
                     if with_comp:
-                        comp_gt   = batch["complication_labels"].to(DEVICE).float()
+                        comp_gt = batch["complication_labels"].to(DEVICE).float()
                         loss, last_loss_dict = criterion(
-                            reint_logit, reint_logvar,
-                            outputs[2], outputs[3],
-                            reint_gt, comp_gt,
+                            reint_logit, outputs[1], reint_gt, comp_gt,
                         )
                     else:
-                        loss, last_loss_dict = criterion(reint_logit, reint_logvar, reint_gt)
+                        loss, last_loss_dict = criterion(reint_logit, reint_gt)
 
                     # L1 on feature gate → sparse feature selection
                     loss = loss + gate_l1_w * torch.sigmoid(get_model(model).feature_gate).sum()

@@ -312,7 +312,6 @@ def build_loaders(
     clin_mean: np.ndarray,
     clin_std: np.ndarray,
     base_dir: Path,
-    cache_dir: Path,
     batch_size: int = 8,
     num_workers: int = 16,
     complications: list[str] | None = None,

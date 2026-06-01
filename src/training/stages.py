@@ -151,14 +151,12 @@ def set_stage_b(model: nn.Module) -> None:
         p.requires_grad = True
     model.visual_proj.requires_grad_(True)
 
-    # Unfreeze BatchNorm gamma/beta in I3ResNet layer3 and layer4.
-    # BN adaptation recalibrates feature statistics for different scanner
-    # protocols (MST/UMCG/AUMC) without touching the learned conv weights.
-    # Filter strictly to encode_image to avoid touching the text encoder.
+    # Unfreeze BatchNorm gamma/beta in I3ResNet layer3 and layer4 for scanner
+    # adaptation, plus full layer4 conv weights for task-specific fine-tuning.
+    # Merlin's layer4 encodes general radiology features; fine-tuning lets it
+    # learn EVAR-specific patterns. Filter to encode_image only.
     for name, p in model.visual_branch.named_parameters():
-        if ("encode_image" in name
-                and ("layer3" in name or "layer4" in name)
-                and ".bn" in name):
+        if "encode_image" in name and ("layer3" in name or "layer4" in name):
             p.requires_grad = True
 
 
@@ -183,10 +181,15 @@ def build_optimizer(model: nn.Module, stage: str) -> torch.optim.Optimizer:
             )
 
     elif stage == "B":
+        # BN params from layer3+layer4 (scanner domain adaptation)
         bn_image_params = [p for n, p in model.visual_branch.named_parameters()
                            if "encode_image" in n
                            and ("layer3" in n or "layer4" in n)
                            and ".bn" in n]
+        # Conv/weight params from layer4 only (task-specific fine-tuning at lower LR)
+        layer4_conv_params = [p for n, p in model.visual_branch.named_parameters()
+                              if "encode_image" in n and "layer4" in n
+                              and ".bn" not in n and p.requires_grad]
         param_groups = [
             {"params": [model.feature_gate],                   "lr": 3e-4, "name": "feature_gate"},
             {"params": model.clinical_branch.parameters(),     "lr": 5e-5, "name": "clinical"},
@@ -196,6 +199,7 @@ def build_optimizer(model: nn.Module, stage: str) -> torch.optim.Optimizer:
             {"params": model.cta_adapter.parameters(),         "lr": 1e-5, "name": "cta_adapter"},
             {"params": model.visual_proj.parameters(),         "lr": 1e-5, "name": "visual_proj"},
             {"params": bn_image_params,                        "lr": 1e-5, "name": "i3resnet_bn"},
+            {"params": layer4_conv_params,                     "lr": 5e-6, "name": "i3resnet_layer4"},
             {"params": model.reintervention_head.parameters(), "lr": 5e-5, "name": "reint_head"},
         ]
         if hasattr(model, "complications_head"):
@@ -224,7 +228,7 @@ def count_trainable(obj: nn.Module | nn.Parameter) -> tuple[int, int]:
 
 def print_model_param_overview(model: nn.Module) -> None:
     model = get_model(model)
-    # Count BN-adapted I3ResNet params separately for clarity
+    # Count adapted I3ResNet params separately for clarity
     bn_params = [p for n, p in model.visual_branch.named_parameters()
                  if "encode_image" in n and ("layer3" in n or "layer4" in n) and ".bn" in n]
     bn_trainable = sum(p.numel() for p in bn_params if p.requires_grad)

@@ -91,7 +91,7 @@ def test_validate_no_comp_required_keys(mock_wandb, model_no_comp):
     required = {
         "val/loss_total", "val/reint_auc", "val/reint_f1",
         "val/reint_precision", "val/reint_recall", "val/reint_accuracy",
-        "val/reint_best_thresh", "val/reint_best_fbeta", "val/mean_uncertainty",
+        "val/reint_best_thresh", "val/reint_best_fbeta",
         "val/reint_TP", "val/reint_FP", "val/reint_TN", "val/reint_FN",
         "val/reint_TPR", "val/reint_TNR", "val/reint_FPR", "val/reint_FNR",
     }
@@ -329,7 +329,7 @@ def test_gate_l1_increases_total_loss(mock_wandb, fresh_model_no_comp, cta, clin
 
     criterion  = ReinterventionLoss(device=torch.device("cpu"))
     outputs    = fresh_model_no_comp(cta, clin, aaa)
-    base_loss, _ = criterion(outputs[0], outputs[1], reint_gt)
+    base_loss, _ = criterion(outputs[0], reint_gt)
 
     gate_l1_w  = 1e-2
     total_loss = base_loss + gate_l1_w * torch.sigmoid(fresh_model_no_comp.feature_gate).sum()
@@ -344,7 +344,7 @@ def test_gate_l1_zero_weight_no_effect(mock_wandb, fresh_model_no_comp, cta, cli
 
     criterion  = ReinterventionLoss(device=torch.device("cpu"))
     outputs    = fresh_model_no_comp(cta, clin, aaa)
-    base_loss, _ = criterion(outputs[0], outputs[1], reint_gt)
+    base_loss, _ = criterion(outputs[0], reint_gt)
 
     total_loss = base_loss + 0.0 * torch.sigmoid(fresh_model_no_comp.feature_gate).sum()
 

@@ -13,6 +13,34 @@ _No unreleased changes._
 
 ---
 
+## [2026-06-01] — Linear probe; plain focal BCE; layer4 fine-tune; v3 hyperparams
+
+### Changed
+
+- **`clinical_branch` architecture: 2-layer MLP → linear probe** (`nn.Linear(clinical_dim, 32)`). With ~37 training positives and 241 clinical features a hidden MLP memorises training cases; a single linear projection over gated features cannot. Removes `LayerNorm`, two `Dropout` layers, and the 128-dim hidden layer entirely.
+- **`gate_l1_weight`: 0.0005 → 0.005** (10×) in all experiment configs. Forces the learned feature gate to retain only ~20–30 clinical features, preventing spurious correlations from driving the high-confidence false positives seen in v1 evaluation.
+- **`focal_gamma`: 2.0 → 3.0** in all experiment configs. Sharpens the gradient on borderline (mid-probability) examples in the 0.2–0.5 range where FPs and TPs were overlapping.
+- **`pos_weight`: 1.0 → 2.0** in all experiment configs. Adds asymmetric gradient emphasis on false negatives even with the 50/50 `WeightedRandomSampler`, pushing true-positive probabilities higher relative to true-negative probabilities.
+- **`p_cta`: 0.10 → 0.0** in all experiment configs. CTA branch confirmed useful by ablation study (`v1_no_complications_ablation_no_cta` achieved lower AUC); dropping it 10% of the time during training weakened the most informative branch.
+- **`reintervention_head` and `complications_head` output width**: `2 → 1` and `n_comp × 2 → n_comp`. Removes the log-variance output from both heads.
+- **Loss functions: heteroscedastic → plain focal BCE**. Removed `_heteroscedastic` helper from `losses.py`. Both `ReinterventionLoss` and `MultiTaskReinterventionLoss` now compute `_focal_bce_per_sample(...).mean()` directly. The heteroscedastic formulation was converging to `logvar≈0` (KL prior minimum), making it a mathematical no-op and wasting model capacity.
+- **`ReinterventionLoss.forward` signature**: removed `reint_logvar` parameter. New signature: `forward(reint_logit, reint_gt)`.
+- **`MultiTaskReinterventionLoss.forward` signature**: removed `reint_logvar` and `comp_logvar` parameters. New signature: `forward(reint_logit, comp_logits, reint_gt, comp_gt)`.
+- **`details_dict` from both losses**: removed `mean_uncertainty` key (was always `≈0` when `logvar→0`).
+- **`ReinterventionRiskModel.forward` return tuple**: no-comp variant returns `(logit,)` instead of `(logit, logvar)`; with-comp variant returns `(logit, comp_logits)` instead of `(logit, logvar, comp_logits, comp_logvar)`.
+- **Stage B visual backbone training**: `set_stage_b` now unfreezes all `layer4` parameters (conv + BN), not just BN. Merlin's `layer4` encodes general radiology features; task-specific fine-tuning lets it learn EVAR re-intervention patterns.
+- **Stage B optimizer**: added `i3resnet_layer4` parameter group at LR 5e-6. Layer4 conv weights are updated at a conservative rate separate from BN adaptation (1e-5). Total Stage B param groups: 9 → 10 (no-comp), 10 → 11 (with-comp).
+- **Confidence formula**: `1 / (1 + exp(0.5 × logvar))` → `2 × |prob − 0.5|` in `ReinterventionXAI.full_explain`. Self-calibrating: confidence is 0 when the model is maximally uncertain (prob ≈ 0.5) and 1 when it is certain (prob near 0 or 1). No post-hoc tuning required.
+- **`_conf_level` thresholds**: HIGH `> 0.75` → `> 0.60`, MED `> 0.55` → `> 0.30`. Calibrated to the `2×|prob−0.5|` scale (HIGH ≡ prob outside [0.20, 0.80]; MED ≡ prob outside [0.35, 0.65]).
+- **`validate()` metrics**: removed `val/mean_uncertainty` (was always ~0 with `logvar→0`).
+- **`prediction.json`**: removed `reint_logvar` field from per-patient output.
+
+### Removed
+
+- **`_heteroscedastic` function** from `src/training/losses.py`. The KL-style symmetric prior `0.5*(exp(logvar)−1−logvar)` was correct in theory but ineffective in practice: with AUC 0.665 the model was globally uncertain and kept `logvar≈0` (the prior minimum), reducing the weighted loss to identical focal BCE while adding dead parameters.
+
+---
+
 ## [2026-05-30] — Fix double pos_weight; recall-threshold checkpoint; CTA-ablation config
 
 ### Added

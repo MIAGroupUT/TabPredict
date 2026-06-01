@@ -82,25 +82,17 @@ def test_disable_checkpointing_sets_flag():
 
 def test_forward_no_comp_output_count(model_no_comp, cta, clin, aaa):
     out = model_no_comp(cta, clin, aaa)
-    assert len(out) == 2, "no-comp model must return exactly 2 tensors"
+    assert len(out) == 1, "no-comp model must return exactly 1 tensor"
 
 
 def test_forward_no_comp_shapes(model_no_comp, cta, clin, aaa):
-    logit, logvar = model_no_comp(cta, clin, aaa)
-    assert logit.shape  == (BATCH, 1)
-    assert logvar.shape == (BATCH, 1)
-
-
-def test_forward_no_comp_logvar_clamped(model_no_comp, cta, clin, aaa):
-    _, logvar = model_no_comp(cta, clin, aaa)
-    assert logvar.min().item() >= -4.0 - 1e-5
-    assert logvar.max().item() <=  2.0 + 1e-5
+    (logit,) = model_no_comp(cta, clin, aaa)
+    assert logit.shape == (BATCH, 1)
 
 
 def test_forward_no_comp_output_finite(model_no_comp, cta, clin, aaa):
-    logit, logvar = model_no_comp(cta, clin, aaa)
+    (logit,) = model_no_comp(cta, clin, aaa)
     assert torch.isfinite(logit).all()
-    assert torch.isfinite(logvar).all()
 
 
 # ── forward — with complications variant ─────────────────────────────────────
@@ -108,23 +100,13 @@ def test_forward_no_comp_output_finite(model_no_comp, cta, clin, aaa):
 
 def test_forward_with_comp_output_count(model_with_comp, cta, clin, aaa):
     out = model_with_comp(cta, clin, aaa)
-    assert len(out) == 4, "with-comp model must return exactly 4 tensors"
+    assert len(out) == 2, "with-comp model must return exactly 2 tensors"
 
 
 def test_forward_with_comp_shapes(model_with_comp, cta, clin, aaa):
-    logit, logvar, comp_logits, comp_logvar = model_with_comp(cta, clin, aaa)
-    assert logit.shape      == (BATCH, 1)
-    assert logvar.shape     == (BATCH, 1)
+    logit, comp_logits = model_with_comp(cta, clin, aaa)
+    assert logit.shape       == (BATCH, 1)
     assert comp_logits.shape == (BATCH, N_COMP)
-    assert comp_logvar.shape == (BATCH, N_COMP)
-
-
-def test_forward_with_comp_logvar_clamped(model_with_comp, cta, clin, aaa):
-    _, logvar, _, comp_logvar = model_with_comp(cta, clin, aaa)
-    assert logvar.min().item()      >= -4.0 - 1e-5
-    assert logvar.max().item()      <=  2.0 + 1e-5
-    assert comp_logvar.min().item() >= -4.0 - 1e-5
-    assert comp_logvar.max().item() <=  2.0 + 1e-5
 
 
 def test_forward_with_comp_all_finite(model_with_comp, cta, clin, aaa):

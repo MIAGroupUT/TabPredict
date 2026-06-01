@@ -28,7 +28,7 @@ model:
 training:
   seed: 3299                  # global seed for Python, NumPy, PyTorch, CUDA
   batch_size: 8               # samples per GPU batch
-  num_workers: 16             # DataLoader worker processes
+  # num_workers is set per experiment: 8 for v1_no_complications, 16 for v1_with_complications
   image_size: [224, 224, 160] # spatial dimensions after preprocessing
   voxel_spacing: [1.5, 1.5, 3]    # resampling target (mm); matches Merlin's pretrained geometry
   hu_range: [-1000, 1000]      # HU clip range for CT intensity scaling
@@ -36,21 +36,24 @@ training:
   # Loss parameters
   focal_gamma: 2.0            # focal loss exponent (down-weights easy negatives)
   label_smoothing: 0.02       # soft target smoothing (reduces overconfidence)
-  pos_weight: 4.58            # BCE positive class weight = N_neg/N_pos (302/66 in training set)
-                              # Note: train batches are balanced 50/50 pos/neg via WeightedRandomSampler,
-                              # so pos_weight encodes clinical preference (FN more costly than FP), not raw imbalance
+  pos_weight: 1.0             # BCE positive class weight; WeightedRandomSampler already
+                              # balances batches 50/50, so pos_weight=1.0 avoids double-correction.
+                              # Increase (e.g. to N_neg/N_pos) only if sampler is disabled.
   gate_l1_weight: 0.0005      # L1 regularisation weight on feature gate
 
   # Threshold selection
   recall_beta: 2.0            # β for F-beta threshold search over PR curve
                               # β > 1 → recall weighted more than precision
+  threshold_recall_target: 0.80  # hard floor: saved threshold is the smallest t giving ≥80% recall on val
 
   # Modality dropout (applied in both Stage A and Stage B training)
   modality_dropout:
     p_cta: 0.10               # probability of zeroing CTA for a batch sample
-    p_aaa_given_cta: 0.15     # probability of zeroing AAA when CTA is already dropped
-    p_aaa_given_clin: 0.15    # probability of zeroing AAA when CTA is present
-    p_clinical: 0.30          # probability of zeroing clinical features (non-causal regulariser)
+    p_aaa_given_cta: 0.15     # probability of zeroing AAA metrics when CTA is present
+                              # (both p_aaa_given_cta and p_aaa_given_clin are checked
+                              #  when CTA is present; AAA is kept when CTA is dropped)
+    p_aaa_given_clin: 0.15    # additional probability of zeroing AAA when CTA is present
+    p_clinical: 0.15          # probability of zeroing clinical features (non-causal regulariser)
 
   train_cache_rate: 0.5       # fraction of training data cached in RAM by MONAI CacheDataset
   val_cache_rate: 1.0         # val set fully cached (smaller, always fits in RAM)
@@ -89,7 +92,7 @@ wandb:
 
 ## Multi-Task Variant Differences
 
-The `v1_with_complications.yaml` adds complications and adjusts the comp loss weight per stage:
+The `v1_with_complications.yaml` adds complications and adjusts the comp loss weight per stage. It also includes per-complication loss and class-imbalance weights:
 
 ```yaml
 model:
@@ -107,6 +110,27 @@ training:
   # Typically lower in Stage A (tabular warm-up) and higher in Stage B
   comp_weight_stage_a: 0.01
   comp_weight_stage_b: 0.3
+
+  # Per-complication relative contribution to the gradient (sqrt(N_pos / N_pos_max))
+  # Prevents noisy rare tasks from dominating the complication gradient
+  comp_loss_weights:
+    endoleak_1a: 0.4
+    endoleak_1b: 0.6
+    endoleak_2:  1.0    # most common; anchor
+    endoleak_3:  0.1
+    endoleak_5:  0.4
+    migration:   0.3
+    infection:   0.2
+
+  # Per-complication positive class weight (N_neg / N_pos in training split, capped at 20)
+  comp_pos_weights:
+    endoleak_1a: 16.0
+    endoleak_1b:  9.0
+    endoleak_2:   2.1
+    endoleak_3:  20.0
+    endoleak_5:  16.0
+    migration:   20.0
+    infection:   20.0
 ```
 
 ---

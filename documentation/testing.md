@@ -7,7 +7,7 @@ cd /home/ranema/AI4EVAR/ai4evar
 ~/.conda/envs/ai4evar/bin/python -m pytest tests/ -v
 ```
 
-251 tests, CPU-only, no GPU required, no external data files required, ~17 seconds.
+259 tests, CPU-only, no GPU required, no external data files required, ~17 seconds.
 
 ### On SLURM
 
@@ -67,13 +67,12 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 - `AAA_METRIC_NAMES` has 5 entries and contains expected keys
 
 **Forward pass — no-complications variant:**
-- Returns exactly 2 tensors `(logit, logvar)` of shape `(B, 1)`
-- logvar is within [-4, 2] bounds
-- All outputs are finite
+- Returns exactly 1 tensor `(logit,)` of shape `(B, 1)`
+- Output is finite
 
 **Forward pass — with-complications variant:**
-- Returns exactly 4 tensors; `comp_logits` and `comp_logvar` have shape `(B, n_comp)`
-- Same logvar clamp and finiteness checks
+- Returns exactly 2 tensors `(logit, comp_logits)`; `comp_logits` has shape `(B, n_comp)`
+- All outputs are finite
 
 **`return_fused=True`:**
 - Returns a `(B, 320)` tensor for both variants
@@ -108,21 +107,15 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 - Correct prediction has lower loss than wrong prediction
 - Label smoothing increases loss for confident predictions
 
-**`_heteroscedastic`:**
-- Returns a scalar
-- Finite output
-- Positive output
-- Handles extreme logvar without NaN
-
 **`ReinterventionLoss`:**
 - Returns `(loss_scalar, details_dict)`
-- `details_dict` contains `loss_total`, `loss_reint`, `mean_uncertainty`
+- `details_dict` contains `loss_total`, `loss_reint` (no `mean_uncertainty`)
 - `loss_total == loss_reint` (no complications term)
 - Handles both `(B, 1)` and `(B,)` GT shapes
 
 **`MultiTaskReinterventionLoss`:**
 - Returns `(loss_scalar, details_dict)`
-- `details_dict` contains `loss_total`, `loss_reint`, `loss_comp`, `mean_uncertainty`
+- `details_dict` contains `loss_total`, `loss_reint`, `loss_comp`
 - All-missing GT (`-1`) produces `loss_comp == 0.0` exactly
 - Partial masking produces `loss_comp > 0`
 - Higher `comp_weight` increases total loss
@@ -270,7 +263,7 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 
 **Setup:** `ReinterventionXAI` stores feature names and complications correctly.
 
-**`_confidence_level`:** HIGH (≥0.75), MED (≥0.50), LOW (<0.50), boundary values.
+**`_confidence_level`:** Takes `conf = 2×|prob−0.5|` ∈ [0,1]. HIGH (>0.60), MED (>0.30), LOW (≤0.30), boundary values.
 
 **`_get_i3res`:** Returns `None` for the mock backbone (no I3ResNet).
 
@@ -386,7 +379,7 @@ Tests for `run_test()` (evaluation/runner.py) — the full inference pipeline.
 **No-complications variant (2 synthetic patients):**
 - Top-level files created: `test_metrics.json`, `test_metrics.csv`, `test_log.txt`
 - Per-patient directories contain `prediction.json`, `xai.json`, `xai_report.txt`
-- `prediction.json` has all required keys (`pid`, `reintervention_prob`, `reintervention_pred`, `reintervention_gt`, `label_type`, `threshold`, `reint_logvar`) with valid values
+- `prediction.json` has all required keys (`pid`, `reintervention_prob`, `reintervention_pred`, `reintervention_gt`, `label_type`, `threshold`) with valid values
 - `test_metrics.json` contains `n_samples`, `auc`, `f1`, `precision`, `recall`, `accuracy`, `threshold_used`; `n_samples == 2`
 
 **With-complications variant (1 synthetic patient):**

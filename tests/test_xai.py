@@ -62,23 +62,28 @@ def test_xai_no_comp_empty_complications(xai_no_comp):
 
 
 def test_conf_level_high(xai_no_comp):
-    assert xai_no_comp._conf_level(0.9) == "HIGH"
+    # conf = 2*|0.9 - 0.5| = 0.8 > 0.6 → HIGH
+    assert xai_no_comp._conf_level(0.8) == "HIGH"
 
 
 def test_conf_level_med(xai_no_comp):
-    assert xai_no_comp._conf_level(0.6) == "MED"
+    # conf = 2*|0.7 - 0.5| = 0.4, 0.3 < 0.4 <= 0.6 → MED
+    assert xai_no_comp._conf_level(0.4) == "MED"
 
 
 def test_conf_level_low(xai_no_comp):
-    assert xai_no_comp._conf_level(0.3) == "LOW"
+    # conf = 2*|0.55 - 0.5| = 0.1 <= 0.3 → LOW
+    assert xai_no_comp._conf_level(0.1) == "LOW"
 
 
 def test_conf_level_boundary_high(xai_no_comp):
-    assert xai_no_comp._conf_level(0.76) == "HIGH"
+    # 0.61 > 0.6 → HIGH
+    assert xai_no_comp._conf_level(0.61) == "HIGH"
 
 
 def test_conf_level_boundary_med(xai_no_comp):
-    assert xai_no_comp._conf_level(0.56) == "MED"
+    # 0.31 > 0.3 → MED
+    assert xai_no_comp._conf_level(0.31) == "MED"
 
 
 # ── _get_i3res ────────────────────────────────────────────────────────────────

@@ -39,10 +39,10 @@ training:
   disable_cta: true            # zero CTA tensor everywhere; skip Stage B
 
   # Loss hyperparameters — identical to v1_no_complications
-  focal_gamma: 2.0
+  focal_gamma: 3.0
   label_smoothing: 0.02
-  pos_weight: 1.0
-  gate_l1_weight: 0.0005
+  pos_weight: 2.0
+  gate_l1_weight: 0.005
   recall_beta: 2.0
   threshold_recall_target: 0.80
 
@@ -65,7 +65,6 @@ training:
 paths:
   base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
   checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_no_complications_ablation_no_cta
-  cache_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/monai_cache
 
 wandb:
   project: AAA-Reintervention-Risk

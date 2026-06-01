@@ -1,11 +1,15 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Experiment: v1_no_complications (v2 hyperparams):
-#   - WeightedRandomSampler added      (50/50 balanced batches; replaces inflated pos_weight)
-#   - gate_l1_weight 0.002 → 0.0005   (loosen feature sparsity; stop zeroing signal)
-#   - label_smoothing 0.05 → 0.02     (let positives look more positive)
-#   - clinical_branch Dropout 0.4/0.3 → 0.3/0.2  (less aggressive; in model code)
-#   - FiLM clamp 0.15 → 0.3           (allow fusion to modulate more; in model code)
-#   - checkpoint criterion: AUC → F2  (recall-weighted; in trainer)
+# Experiment: v1_no_complications:
+#   - WeightedRandomSampler added      (50/50 balanced batches)
+#   - clinical_branch: MLP → linear probe  (no hidden layer; prevents overfitting
+#                                            with ~37 training positives)
+#   - gate_l1_weight 0.0005 → 0.005   (10× sparsity; forces gate to ~20-30 features)
+#   - focal_gamma 2.0 → 3.0           (harder gradient on mid-prob hard examples)
+#   - pos_weight 1.0 → 2.0            (asymmetric gradient favouring recall)
+#   - p_cta 0.10 → 0.0               (CTA confirmed useful by ablation; stop dropping it)
+#   - reintervention_head output: 2 → 1  (remove logvar; plain focal BCE)
+#   - confidence: logvar-based → 2*|prob-0.5|  (self-calibrating; no post-hoc tuning)
+#   - Stage B: layer4 conv unfrozen   (task-specific fine-tuning of Merlin backbone)
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: v1_no_complications
@@ -32,16 +36,16 @@ training:
   val_cache_rate: 1.0
 
   # Loss hyperparameters
-  focal_gamma: 2.0
+  focal_gamma: 3.0           # harder gradient on mid-prob borderline examples
   label_smoothing: 0.02
-  pos_weight: 1.0            # WRS already balances batches 50/50; no double-correction
-  gate_l1_weight: 0.0005     # gentle sparsity; 0.002 was zeroing too many features
+  pos_weight: 2.0            # asymmetric gradient favouring recall over precision
+  gate_l1_weight: 0.005      # 10× sparsity forces gate to ~20-30 features (37 train pos)
   recall_beta: 2.0           # checkpoint saved by F2-score (recall-weighted)
   threshold_recall_target: 0.80  # threshold saved = smallest t giving ≥80% recall on val
 
   # Causal modality dropout — applied in BOTH Stage A and Stage B
   modality_dropout:
-    p_cta: 0.10
+    p_cta: 0.0               # CTA confirmed useful by ablation; never drop it
     p_aaa_given_cta: 0.15
     p_aaa_given_clin: 0.15
     p_clinical: 0.15         # 0.30 too aggressive with only ~37 train positives
@@ -64,7 +68,6 @@ training:
 paths:
   base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
   checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_no_complications
-  cache_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/monai_cache
 
 wandb:
   project: AAA-Reintervention-Risk

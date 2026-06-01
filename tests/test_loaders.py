@@ -543,7 +543,7 @@ def test_build_loaders_returns_two_dataloaders(mock_cache, mock_dl, tmp_path):
 
     result = build_loaders(
         splits, config, feature_names, clin_mean, clin_std,
-        base_dir=tmp_path, cache_dir=tmp_path / "cache", batch_size=2,
+        base_dir=tmp_path, batch_size=2,
     )
     assert isinstance(result, tuple) and len(result) == 2
 
@@ -559,7 +559,7 @@ def test_build_loaders_train_uses_sampler(mock_cache, mock_dl, tmp_path):
 
     build_loaders(
         splits, config, feature_names, clin_mean, clin_std,
-        base_dir=tmp_path, cache_dir=tmp_path / "cache", batch_size=2,
+        base_dir=tmp_path, batch_size=2,
     )
     train_kwargs = mock_dl.call_args_list[0].kwargs
     assert isinstance(train_kwargs.get("sampler"), WeightedRandomSampler)
@@ -576,7 +576,7 @@ def test_build_loaders_val_uses_shuffle_false(mock_cache, mock_dl, tmp_path):
 
     build_loaders(
         splits, config, feature_names, clin_mean, clin_std,
-        base_dir=tmp_path, cache_dir=tmp_path / "cache", batch_size=2,
+        base_dir=tmp_path, batch_size=2,
     )
     val_kwargs = mock_dl.call_args_list[1].kwargs
     assert val_kwargs.get("shuffle") is False
@@ -592,7 +592,7 @@ def test_build_loaders_batch_size_forwarded(mock_cache, mock_dl, tmp_path):
 
     build_loaders(
         splits, config, feature_names, clin_mean, clin_std,
-        base_dir=tmp_path, cache_dir=tmp_path / "cache", batch_size=4,
+        base_dir=tmp_path, batch_size=4,
     )
     assert mock_dl.call_args_list[0].kwargs["batch_size"] == 4
     assert mock_dl.call_args_list[1].kwargs["batch_size"] == 4

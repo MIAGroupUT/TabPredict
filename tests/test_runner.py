@@ -159,7 +159,7 @@ def test_run_test_prediction_json_format(tmp_path, fresh_model_no_comp):
     pred = json.loads((out_dir / "P001" / "prediction.json").read_text())
     required = {
         "pid", "reintervention_prob", "reintervention_pred",
-        "reintervention_gt", "label_type", "threshold", "reint_logvar",
+        "reintervention_gt", "label_type", "threshold",
     }
     assert required <= pred.keys()
     assert pred["pid"] == "P001"

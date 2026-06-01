@@ -49,16 +49,16 @@ The 4-channel CTA input concatenates: CT intensity · lumen segmentation mask ·
 | Component | Detail |
 |---|---|
 | `feature_gate` | Learnable `nn.Parameter` of shape `(clinical_dim,)`, passed through sigmoid at forward time. Gates each clinical feature independently. L1-regularised to encourage sparsity. |
-| `clinical_branch` | Two-layer MLP: `Linear(clinical_dim, 128) → LayerNorm → ReLU → Dropout(0.3) → Linear(128, 32) → Dropout(0.2)` |
+| `clinical_branch` | Linear probe: `Linear(clinical_dim, 32)` — single layer, no hidden MLP. With ~37 training positives a MLP memorises; a linear probe cannot. |
 | Input | z-normalised feature vector (~744 features from RADAR); see [Data](data.md) |
 
-The feature gate multiplies the normalised input elementwise before passing it to the MLP. Features with gate values near zero are effectively suppressed. The L1 penalty (`gate_l1_weight`, default 0.0005) keeps the gate sparse without over-suppressing on this dataset size.
+The feature gate multiplies the normalised input elementwise before passing it to the linear probe. Features with gate values near zero are effectively suppressed. The L1 penalty (`gate_l1_weight`, default 0.005) forces the gate to keep only ~20–30 features, preventing clinical branch overfitting with the ~37 training positives available.
 
 ### AAA Metrics Branch
 
 | Component | Detail |
 |---|---|
-| `aaa_metrics_branch` | Two-layer MLP: `Linear(5, 32) → GELU → Linear(32, 32)` |
+| `aaa_metrics_branch` | Two-layer MLP: `Linear(5, 32) → ReLU → Linear(32, 32) → ReLU` |
 | Input | 5 geometry scalars derived from nnUNet segmentation (see [Data](data.md)) |
 
 The 5 metrics are:
@@ -78,7 +78,7 @@ avg_lumen_to_wall_dist_mm
 After concatenating the three branch embeddings (256 + 32 + 32 = **320-dim**), a FiLM (Feature-wise Linear Modulation) layer applies a learned affine transformation:
 
 ```
-γ, β = condition_net(fused)          # two linear heads
+γ, β = condition_net(fused)          # MLP: Linear(320,256)→ReLU→Dropout(0.3)→Linear(256,640)
 γ = tanh(γ) × 0.3                    # clamp to (-0.3, +0.3)
 β = tanh(β) × 0.3
 fused = (1 + γ) × fused + β          # modulate
@@ -91,26 +91,19 @@ The ±0.3 clamp on γ/β allows meaningful cross-modal modulation (±30%) while 
 
 ## Output Heads
 
-Both heads produce a **logit** and a **log-variance** (for heteroscedastic uncertainty).
+Each head produces a single **logit** per task (no log-variance). Confidence is derived from the predicted probability, not from a learned uncertainty term.
 
 ### `reintervention_head`
 
-- `Linear(320, 1)` for logit
-- `Linear(320, 1)` for log-variance (clamped to **[-4, 2]** in the forward pass)
+- `Linear(320, 256) → ReLU → Dropout(0.2) → Linear(256, 1)`
 
-Predicted probability: `sigmoid(logit)`. Predicted uncertainty (std): `exp(0.5 × logvar)`.
-
-The logvar clamp bounds:
-- Lower bound -4: allows the model to express high confidence (σ ≈ 0.018)
-- Upper bound 2: caps maximum expressed uncertainty (σ ≈ 2.7)
-- A quadratic penalty (0.2 × logvar²) in the loss discourages the model from staying at the upper bound to suppress gradients
+Predicted probability: `sigmoid(logit)`. Confidence: `2 × |prob − 0.5|` — zero when maximally uncertain (prob ≈ 0.5), one when certain (prob near 0 or 1). This is self-calibrating: if training produces well-separated probabilities, confidence is high automatically.
 
 ### `complications_head`
 
-Only present when `complications` is not empty (multi-task variant). Produces one logit and one log-variance **per complication**:
+Only present when `complications` is not empty (multi-task variant). Produces one logit **per complication**:
 
-- `Linear(320, n_comp)` for logits
-- `Linear(320, n_comp)` for log-variances (same [-4, 2] clamp)
+- `Linear(320, 256) → ReLU → Dropout(0.2) → Linear(256, n_comp)`
 
 The 7 complications supported (`COMPLICATIONS_FULL`):
 
@@ -128,18 +121,16 @@ from src.models.reintervention import ReinterventionRiskModel
 
 # Primary-task model
 model = ReinterventionRiskModel(clinical_dim=744, aaa_dim=5, complications=[])
-logit, logvar = model(cta, clin, aaa)
-# logit:  (B, 1) — reintervention logit
-# logvar: (B, 1) — log-variance, clamped to [-4, 2]
+(logit,) = model(cta, clin, aaa)
+# logit: (B, 1) — reintervention logit
 
 # Multi-task model
 model = ReinterventionRiskModel(
     clinical_dim=744, aaa_dim=5,
     complications=["endoleak_1a", "endoleak_1b", "migration", ...],
 )
-logit, logvar, comp_logits, comp_logvar = model(cta, clin, aaa)
-# comp_logits:  (B, n_comp)
-# comp_logvar:  (B, n_comp)
+logit, comp_logits = model(cta, clin, aaa)
+# comp_logits: (B, n_comp)
 
 # Return the fused 320-dim representation instead (useful for analysis)
 fused = model(cta, clin, aaa, return_fused=True)   # (B, 320)

@@ -48,21 +48,18 @@ Goal: recalibrate the Merlin backbone's feature statistics to the specific scann
 ### `ReinterventionLoss` — Primary Task
 
 ```
-loss = exp(−logvar) × focal_BCE(logit, gt) + 0.5 × (exp(logvar) − 1 − logvar)
+loss = mean( focal_BCE(logit, gt) )
 ```
 
-Component by component:
+Plain focal BCE averaged over the batch:
 
-| Term | Purpose |
-|---|---|
-| `exp(−logvar) × focal_BCE` | Down-weights loss when the model is uncertain; focal weighting (γ=2) reduces the contribution of easy negatives |
-| `+ 0.5 × (exp(logvar) − 1 − logvar)` | KL-style symmetric prior — minimum is 0 at logvar=0, penalises both logvar→+∞ (exponential) and logvar→−∞ (linear). When train BCE→0 the optimal logvar→0, preventing the train loss from going negative and the val loss from inflating via a large precision amplifier. |
+| Setting | Value | Purpose |
+|---|---|---|
+| `focal_gamma` | 3.0 | Focuses gradient on hard borderline examples in the 0.2–0.5 probability range |
+| `label_smoothing` | 0.02 | Slightly softens hard 0/1 targets |
+| `pos_weight` | 2.0 | Asymmetric gradient — false negatives penalised 2× false positives |
 
-Additional settings:
-- **Label smoothing** ε = 0.02 — slightly softens the hard 0/1 targets
-- **logvar clamp** [-4, 2] applied inside the forward pass before the loss is computed
-
-The forward returns `(loss_scalar, details_dict)` where `details_dict` contains `loss_total`, `loss_reint`, `mean_uncertainty`.
+The forward returns `(loss_scalar, details_dict)` where `details_dict` contains `loss_total`, `loss_reint`.
 
 ### `MultiTaskReinterventionLoss` — With Complications
 
@@ -71,7 +68,7 @@ loss = loss_reint + comp_weight × mean(loss_comp_i)
 ```
 
 - `loss_reint` is identical to the primary-task loss above
-- Each `loss_comp_i` is a per-complication focal BCE with heteroscedastic weighting
+- Each `loss_comp_i` is a per-complication plain focal BCE
 - Labels of **-1** are masked out — per-complication losses are only computed on rows with valid ground truth for that complication
 - `comp_weight` is controlled by the YAML config and typically differs between stages (lower in Stage A, higher in Stage B once visual features are available)
 
@@ -83,7 +80,7 @@ Added to the total loss in both variants:
 loss += gate_l1_weight × sigmoid(feature_gate).sum()
 ```
 
-This pushes feature gate values toward zero for unimportant features, producing a sparse gate after training. The weight is kept small (default 0.0005) to avoid over-suppressing features on this dataset size.
+This pushes feature gate values toward zero for unimportant features, producing a sparse gate after training. Default 0.005 — strong enough to force the gate to retain only ~20–30 features from the full clinical feature set, preventing overfitting given ~37 training positives.
 
 ---
 
@@ -117,10 +114,11 @@ Visual branch parameters are not included (frozen → no gradients).
 | `cta_adapter` | CTA input adapter | 1e-5 |
 | `visual_proj` | Visual projection layer | 1e-5 |
 | `i3resnet_bn` | BatchNorm γ/β in I3ResNet layer3+4 | 1e-5 |
+| `i3resnet_layer4` | Convolutional weights in I3ResNet layer4 | 5e-6 |
 | `reint_head` | Reintervention head | 5e-5 |
 | `comp_head` | Complication heads (if present) | 5e-5 |
 
-I3ResNet convolutional weights are not updated in Stage B (frozen); only BatchNorm statistics are adapted.
+Layer4 conv weights are fine-tuned at a conservative 5e-6 LR so the backbone can learn EVAR-specific visual patterns beyond what general radiology pre-training provides. Layer3 conv weights remain frozen (only BN adapted).
 
 ### Learning Rate Schedule
 
@@ -135,13 +133,13 @@ Both stages use `CosineAnnealingWarmRestarts` with:
 Applied during **both Stage A and Stage B training** to simulate real-world missingness and force all modalities to develop independent representations.
 
 ```
-p(CTA missing)                = p_cta           (default 0.10)
-p(AAA missing | CTA dropped)  = p_aaa_given_cta  (default 0.15)
-p(AAA missing | CTA present)  = p_aaa_given_clin (default 0.15)
-p(Clinical missing)           = p_clinical      (default 0.30)
+p(CTA missing)                          = p_cta           (0.10)
+p(AAA missing | CTA present)            ≈ 1−(1−p_aaa_given_cta)×(1−p_aaa_given_clin)  (≈ 0.28 at default 0.15 each)
+p(AAA missing | CTA absent)             = 0  (AAA is kept when CTA is dropped)
+p(Clinical missing)                     = p_clinical      (0.15)
 ```
 
-**Causal constraint:** AAA metrics are derived from CTA segmentation, so they cannot logically be available when the CTA is absent. The dropout logic encodes this: when CTA is zeroed out for a sample, the AAA tensor for that sample is also zeroed out with additional probability.
+**AAA when CTA is absent:** AAA metrics may originate from clinical records or a prior measurement, so they are intentionally kept even when CTA is zeroed. When CTA is present, both `p_aaa_given_cta` and `p_aaa_given_clin` are checked independently, giving an effective combined dropout probability of ≈28% at the defaults.
 
 **Clinical dropout:** Clinical data is always available in practice, but we drop it during training anyway. This prevents the visual branch from learning to defer to the tabular shortcut (which is already well-trained from Stage A).
 

@@ -2,8 +2,8 @@
 ReinterventionRiskModel — shared architecture for both training variants.
 
 Instantiate with:
-    complications=[]          → no complication head; forward returns (logit, logvar)
-    complications=[...]       → adds complications_head; forward returns (logit, logvar, comp_logits, comp_logvar)
+    complications=[]          → no complication head; forward returns (logit,)
+    complications=[...]       → adds complications_head; forward returns (logit, comp_logits)
 
 This single class replaces the two copies that lived in notebooks/.
 """
@@ -134,12 +134,11 @@ class ReinterventionRiskModel(nn.Module):
         # L1 reg during training pushes unimportant gates toward 0.
         self.feature_gate = nn.Parameter(torch.zeros(clinical_dim))
 
-        self.clinical_branch = nn.Sequential(
-            nn.Linear(clinical_dim, 128), nn.LayerNorm(128), nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(128, 32),
-            nn.Dropout(0.2),
-        )
+        # Linear probe: single projection from gated features → 32-dim.
+        # No hidden layer by design — with ~37 training positives an MLP
+        # memorises the training set; a linear model cannot.
+        self.clinical_branch = nn.Linear(clinical_dim, 32)
+
         self.aaa_metrics_branch = nn.Sequential(
             nn.Linear(aaa_dim, 32), nn.ReLU(),
             nn.Linear(32, 32), nn.ReLU(),
@@ -158,13 +157,13 @@ class ReinterventionRiskModel(nn.Module):
         self.reintervention_head = nn.Sequential(
             nn.Linear(self._fusion_dim, 256), nn.ReLU(),
             nn.Dropout(0.2),
-            nn.Linear(256, 2),  # logit + logvar
+            nn.Linear(256, 1),  # logit only
         )
         if self.complications:
             self.complications_head = nn.Sequential(
                 nn.Linear(self._fusion_dim, 256), nn.ReLU(),
                 nn.Dropout(0.2),
-                nn.Linear(256, num_comp * 2),  # (logit + logvar) per complication
+                nn.Linear(256, num_comp),  # one logit per complication
             )
 
     # ── internal helpers ─────────────────────────────────────────────────────
@@ -192,8 +191,8 @@ class ReinterventionRiskModel(nn.Module):
     ) -> tuple[torch.Tensor, ...]:
         """
         Returns:
-            If complications=[]:  (reint_logit, reint_logvar)
-            If complications=[…]: (reint_logit, reint_logvar, comp_logits, comp_logvar)
+            If complications=[]:  (reint_logit,)
+            If complications=[…]: (reint_logit, comp_logits)
         """
         cta   = self.cta_adapter(cta)
         v_emb = self.visual_proj(self._encode_visual(cta))
@@ -207,15 +206,10 @@ class ReinterventionRiskModel(nn.Module):
         if return_fused:
             return fused
 
-        reint_out    = self.reintervention_head(fused)
-        reint_logit  = reint_out[:, 0:1]
-        reint_logvar = torch.clamp(reint_out[:, 1:2], -4, 2)
+        reint_logit = self.reintervention_head(fused)
 
         if not self.complications:
-            return reint_logit, reint_logvar
+            return (reint_logit,)
 
-        comp_out    = self.complications_head(fused)
-        comp_out    = comp_out.view(comp_out.size(0), len(self.complications), 2)
-        comp_logits = comp_out[:, :, 0]
-        comp_logvar = torch.clamp(comp_out[:, :, 1], -4, 2)
-        return reint_logit, reint_logvar, comp_logits, comp_logvar
+        comp_logits = self.complications_head(fused)
+        return reint_logit, comp_logits
