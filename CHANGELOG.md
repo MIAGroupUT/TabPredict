@@ -13,6 +13,60 @@ _No unreleased changes._
 
 ---
 
+## [2026-06-02] — Add TabM backbone; merge AAA scalars; fix GradCAM planes + training regression
+
+### Added
+
+- **`pytest.ini`** (new file). Suppresses two unavoidable third-party import warnings: `FutureWarning: The cuda.cudart module is deprecated` (triggered by MONAI/CUDA on import) and `DeprecationWarning: builtin type … has no __module__ attribute` (SWIG bindings from VTK/ITK transitive dependencies). Neither is fixable in project code; both are silenced with targeted `filterwarnings` patterns.
+- **`ReinterventionXAI._build_views` and `_orient` static methods** (`src/xai/explainer.py`). Extracted the duplicated view-construction code from `save_gradcam_pngs` and `get_gradcam_wandb_images` into a single helper. `_orient` applies `np.flipud(arr.T)` to put anatomical "up" at screen top for all three planes (superior at top for sagittal/coronal, anterior at top for axial).
+
+- **`src/models/tabm.py`** — new `TabMEmbed` module wrapping the official `tabm` package (Gorishniy et al., 2024, "TabM: Advancing Tabular Deep Learning with Parameter-Efficient Ensembling"). Trains an ensemble of *k* MLPs with shared weights and per-member rank-1 BatchEnsemble adapters. Returns `(B, k, 32)`; reduces over the ensemble axis via mean to satisfy the `(B, 32)` branch contract. No reimplementation — uses `TabM.make(n_num_features=..., cat_cardinalities=[], d_out=32, **tabm_cfg)` from the library directly.
+- **`PeriodicEmbeddings` numerical feature encoding** (default `num_embeddings: periodic`). Before the MLP ensemble each scalar feature is projected to a `d_embedding`-dim sinusoidal representation `[sin(f₁x), cos(f₁x), …]` via `rtdl_num_embeddings.PeriodicEmbeddings`. Uses `lite=True` (shared frequencies across all 744 features, 48 learnable params) instead of per-feature frequencies (~35 K params) — the right choice for 377 training samples. Disable with `model.tabm.num_embeddings: none`.
+- **`clinical_backbone` config key** (`model.clinical_backbone: mlp | tabm`, default `mlp`). Selects the clinical encoder at construction time with no code changes. Switch via YAML or runtime override: `--set model.clinical_backbone=tabm`.
+- **`tabm:` block** in both experiment YAMLs (`model.tabm: {k, n_blocks, d_block, dropout, num_embeddings, d_embedding}`). Only consumed when `clinical_backbone: tabm`; has no effect on the MLP path.
+- **`clinical_backbone` and `tabm_cfg` saved to checkpoints** in `trainer.py` and read back in `runner.py` (same fallback pattern as `complications`). Ensures `test.py` rebuilds the exact architecture that was trained.
+- **`tabm==0.0.3` and `rtdl_num_embeddings==0.0.12`** added to `requirements.txt` and `requirements-ci.txt`.
+- **20 new tests**: `tests/test_tabm.py` (13 tests — output shape, determinism, PeriodicEmbeddings and none paths) and `tests/test_models.py` TabM section (7 tests — model builds, backbone stored, forward shapes, clinical branch output dim, unknown backbone raises). Total test count: 254 → 274.
+- **`_build_clinical_branch` static method** on `ReinterventionRiskModel`. Centralises MLP / TabM construction; raises `ValueError` for unknown backbone names.
+
+### Fixed
+
+- **Training regression (always-predict-1 + AUC collapse)** introduced in the 01062026 commit by reverting four destabilising changes while preserving the clean loss simplification:
+  - **`pos_weight`: 2.0 → 1.0** in both experiment configs. `WeightedRandomSampler` already balances batches 50/50; `pos_weight=2.0` on top was double-correcting class imbalance, driving the model to predict positive for every sample (TNR dropped from 0.51 to 0.01).
+  - **`focal_gamma`: 3.0 → 2.0**. γ=3 compounded the positive bias by further down-weighting confident-correct negatives under an already 50/50 sampler.
+  - **`gate_l1_weight`: 0.005 → 0.0005**. 10× sparsity was zeroing the clinical gate entirely, collapsing the main non-visual discriminator and tanking AUC from 0.665 to 0.556.
+  - **Stage B: layer4 conv weights re-frozen; BN-only adaptation restored**. Fine-tuning a full 3D ResNet conv block on 63 training positives corrupted Merlin's pretrained features. BN-only adaptation (~50 K params) recalibrates scanner-domain statistics safely.
+  - **`clinical_branch` restored to MLP** (`Linear(744→128)→LN→ReLU→Dropout(0.3)→Linear(128→32)→Dropout(0.2)`). The linear probe combined with 10× L1 gutted clinical signal from two directions simultaneously.
+- **GradCAM plane labels and display orientation corrected** (`src/xai/explainer.py`). In RAS-oriented data (axis 0 = R, 1 = A, 2 = S), the old `views` dict had all three labels wrong: `ct[D//2]` slices along R → **sagittal** (was labeled "axial"); `ct[:, H//2]` slices along A → **coronal** (was labeled "sagittal"); `ct[:, :, W//2]` slices along S → **axial** (was labeled "coronal"). Fixed across both `save_gradcam_pngs` (PNG output) and `get_gradcam_wandb_images` (W&B logging). Each slice also receives `_orient` (`np.flipud(arr.T)`) so superior is at screen top for sagittal/coronal and anterior is at screen top for axial.
+- **`Orientationd(labels=None)`** in `get_cached_transforms` (`src/data/loaders.py`). Explicitly opts into the new MONAI default rather than relying on the deprecated implicit value, silencing `FutureWarning: … labels … was changed in version None`.
+- **`build_data_list` path resolution** (`src/data/loaders.py`). Paths are now read from the config JSON (`pre_op["nifti"]`, `pre_op["label"]`, `pre_op["dist_map"]`, `pre_op["metrics"]`) instead of being reconstructed from `base_dir`. Fixes a split-of-zero bug where stale v1 paths stored in a v2 config caused all 577 patients to fail the NIfTI existence check and be skipped.
+- **`_load_aaa_metrics` accepts `str | None`** (was typed as `Path`). Calling `.exists()` on a string path or `None` raised `AttributeError`; now wraps in `Path()` and guards `None` explicitly.
+- **`pre_op` null guard in `build_data_list`**: `(pdata["scans"].get("pre_op")) or {}` prevents `AttributeError` when a JSON-null `pre_op` entry is encountered.
+
+### Changed
+
+- **`aaa_metrics_branch` removed; AAA scalars merged into the tabular branch** (`src/models/reintervention.py`). The dedicated `Linear(5→32)→ReLU→Linear(32→32)→ReLU` branch is gone. In `forward`, the 5 AAA geometry scalars are now `cat`-appended to the gated clinical vector *after* the sigmoid gate and passed together into `clinical_branch`. **Why**: the old design gave 5 scalars a 32-dim fusion slot equal to 744 clinical features (disproportionate vote), and `Linear(5→32→32)` (~1,200 params) was heavily overparameterised for 5 inputs. Appending after the gate means scalars bypass L1 sparsity pressure (they are always informative) while sharing the MLP/TabM encoder fairly.
+- **Fusion dimension 320 → 288** (`_fusion_dim`). Two branches (256-dim visual + 32-dim tabular) instead of three (256 + 32 + 32). `condition_net`, `fusion_norm`, and both output heads updated accordingly.
+- **`clinical_branch` input dim extended**: `_build_clinical_branch` is now called with `clinical_dim + aaa_dim` (749 for RADAR). MLP first layer: `Linear(744→128)` → `Linear(749→128)`. TabM: `n_num_features` = 749. Feature gate stays shape `(clinical_dim,)` — it only covers clinical features.
+- **`set_stage_a` / `set_stage_b`** in `stages.py`: removed the `aaa_metrics_branch` freeze/unfreeze blocks (attribute no longer exists on the model).
+- **`build_optimizer` param groups reduced**: Stage A 6 → 5 (no-comp), 7 → 6 (with-comp); Stage B 9 → 8. Removed the `"aaa"` param group in both stages.
+- **`print_model_param_overview`**: removed `aaa_metrics_branch` row.
+- **Architecture docs comprehensively updated** (`documentation/architecture.md`, `CLAUDE.md`): diagram now shows two-branch fusion at 288-dim; new "Tabular Branch" section explains gate-then-append design; "Why merge?" rationale added to key-design-choices table; all head/FiLM dim references corrected 320 → 288.
+- **Actual split stats updated** across both experiment configs and comments: train N=377, 63 positives, 314 negatives (raw `pos_weight` ratio = 4.98 — must not be used with WRS). Previous comments referenced "~37 training positives" from an outdated estimate.
+- **Checkpoint directories renamed**: `v1_no_complications` → `v1_no_complications_02062026`, `v1_with_complications` → `v1_with_complications_02062026`, to keep new-split runs cleanly separated from prior checkpoints.
+- **`cache_dir` removed** from paths config (both YAMLs and `configuration.md`). Was already unused in `trainer.py` after a previous cleanup; stale key removed.
+- **`p_cta` documentation**: corrected default to `0.0` in `configuration.md` (was showing old `0.10`).
+- **Stage B optimizer**: removed `i3resnet_layer4` param group; Stage B groups 10 → 9 (no-comp), 11 → 10 (with-comp). Test `test_build_optimizer_stage_b_group_count` updated accordingly.
+
+### Tests
+
+- **Fusion dim assertions updated 320 → 288**: `test_return_fused_no_comp`, `test_return_fused_with_comp`, and all three `test_film_*` clamp tests.
+- **`test_tabm_clinical_branch_output_dim`**: updated to cat gated clinical + aaa before calling `clinical_branch` directly (branch now expects 749-dim input).
+- **`test_set_stage_a_trains_aaa_branch` → `test_set_stage_a_no_aaa_branch`**: now asserts that `aaa_metrics_branch` does *not* exist on the model.
+- **Optimizer group count tests**: Stage A 6 → 5, Stage A with-comp 7 → 6, Stage B 9 → 8.
+
+---
+
 ## [2026-06-01] — Linear probe; plain focal BCE; layer4 fine-tune; v3 hyperparams
 
 ### Changed

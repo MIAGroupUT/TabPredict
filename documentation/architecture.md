@@ -2,7 +2,7 @@
 
 ## Overview
 
-`ReinterventionRiskModel` is a multi-modal, multi-task neural network. It fuses three independent input branches — a 3D visual branch, a clinical tabular branch, and an AAA geometry branch — into a shared 320-dimensional representation, which is then passed through task-specific output heads.
+`ReinterventionRiskModel` is a multi-modal, multi-task neural network. It fuses two input branches — a 3D visual branch and a unified tabular branch — into a shared 288-dimensional representation, which is then passed through task-specific output heads.
 
 ```
 CTA volume (4-ch, 224×224×160)
@@ -12,12 +12,10 @@ CTA volume (4-ch, 224×224×160)
                                                                               │
 Clinical tabular (~744 features, z-normalised)                                │
     → feature_gate (per-feature sigmoid)                                      │
-    → clinical_branch (MLP → 32-dim)          → 32-dim clinical embedding ────┤
-                                                                              │
-AAA geometry (5 scalars)                                                      │
-    → aaa_metrics_branch (MLP → 32-dim)       → 32-dim AAA embedding ─────────┘
+    → cat with AAA geometry (5 scalars, no gate)                              │
+    → clinical_branch (MLP or TabM → 32-dim)  → 32-dim tabular embedding ─────┘
                                                         │
-                                          cat → 320-dim fused representation
+                                          cat → 288-dim fused representation
                                                         │
                                           FiLM (condition_net: γ/β, tanh×0.3)
                                           LayerNorm (fusion_norm)
@@ -25,7 +23,7 @@ AAA geometry (5 scalars)                                                      �
                                ┌────────────────────────┤
                                │                        │
                    reintervention_head          complications_head
-                   (logit, log-variance)        (logit, log-variance per comp)
+                   (logit)                      (logit per complication)
                                                 [only if complications ≠ []]
 ```
 
@@ -44,24 +42,20 @@ AAA geometry (5 scalars)                                                      �
 
 The 4-channel CTA input concatenates: CT intensity · lumen segmentation mask · ILT segmentation mask · distance map (see [Data](data.md) for how this is assembled).
 
-### Clinical Branch
+### Tabular Branch (Clinical + AAA Metrics)
 
 | Component | Detail |
 |---|---|
 | `feature_gate` | Learnable `nn.Parameter` of shape `(clinical_dim,)`, passed through sigmoid at forward time. Gates each clinical feature independently. L1-regularised to encourage sparsity. |
-| `clinical_branch` | Linear probe: `Linear(clinical_dim, 32)` — single layer, no hidden MLP. With ~37 training positives a MLP memorises; a linear probe cannot. |
-| Input | z-normalised feature vector (~744 features from RADAR); see [Data](data.md) |
+| AAA append | The 5 AAA geometry scalars are concatenated to the gated clinical vector **after** gating, giving an input of `(clinical_dim + 5)` to the branch. They bypass the L1 gate since they are imaging-derived and always informative. |
+| `clinical_branch` | Configurable backbone outputting **(B, 32)**. Input dim = `clinical_dim + aaa_dim`. Default: MLP (`Linear(749→128)→LN→ReLU→Dropout(0.3)→Linear(128→32)→Dropout(0.2)`). Alternative: **TabM** (see below). |
+| Input | z-normalised clinical feature vector (~744 features from RADAR) + 5 AAA geometry scalars |
 
-The feature gate multiplies the normalised input elementwise before passing it to the linear probe. Features with gate values near zero are effectively suppressed. The L1 penalty (`gate_l1_weight`, default 0.005) forces the gate to keep only ~20–30 features, preventing clinical branch overfitting with the ~37 training positives available.
+The feature gate multiplies the normalised clinical input elementwise before appending the AAA scalars. Clinical features with gate values near zero are effectively suppressed while the geometry scalars remain unaffected. The L1 penalty (`gate_l1_weight`, default 0.0005) encourages sparsity while preserving signal from the 63 training positives.
 
-### AAA Metrics Branch
+**Why merge AAA scalars into the tabular branch?** A dedicated two-layer MLP for just 5 inputs (`Linear(5,32)→Linear(32,32)`) was heavily overparameterised (~1,200 params for 5 features) and gave the 5 scalars the same 32-dim "vote" in the fused representation as the 744-feature clinical branch. Appending them after gating shares the encoder capacity fairly and reduces the fusion dimension from 320 to 288, while keeping their signal intact (they bypass sparsity pressure via the gate).
 
-| Component | Detail |
-|---|---|
-| `aaa_metrics_branch` | Two-layer MLP: `Linear(5, 32) → ReLU → Linear(32, 32) → ReLU` |
-| Input | 5 geometry scalars derived from nnUNet segmentation (see [Data](data.md)) |
-
-The 5 metrics are:
+#### The 5 AAA geometry scalars
 
 ```
 volume_lumen_ml
@@ -71,14 +65,38 @@ max_lumen_to_wall_dist_mm
 avg_lumen_to_wall_dist_mm
 ```
 
+#### TabM backbone (optional)
+
+`clinical_backbone: tabm` switches the branch to **TabM** (Gorishniy et al., 2024 — "TabM: Advancing Tabular Deep Learning with Parameter-Efficient Ensembling"). TabM trains an ensemble of *k* MLPs with shared weights and per-member rank-1 adapters (BatchEnsemble). It returns `(B, k, 32)`; we reduce via ensemble mean to `(B, 32)`. TabM takes `clinical_dim + aaa_dim` features as input, so the AAA scalars are embedded together with the clinical features.
+
+**Numerical feature embeddings (`PeriodicEmbeddings`, enabled by default):** before the MLP ensemble each scalar feature is projected into a `d_embedding`-dim sinusoidal representation — `[sin(f₁x), cos(f₁x), …]` — letting the network capture non-linear feature relationships. We use `lite=True` (shared frequencies across all features) rather than per-feature frequencies because with 749 features and only 377 training samples, per-feature frequencies introduce ~35 K extra params with too little data to learn them reliably. Shared frequencies cost just 48 params and are sufficient for our scale. Set `num_embeddings: none` to disable.
+
+```yaml
+model:
+  clinical_backbone: tabm   # mlp (default) | tabm
+  tabm:
+    k: 16                   # ensemble members
+    n_blocks: 2             # MLP depth per member
+    d_block: 128            # hidden width per member
+    dropout: 0.3
+    num_embeddings: periodic  # periodic (default) | none
+    d_embedding: 16           # embedding dim per feature (periodic only)
+```
+
+To benchmark without editing the YAML:
+```bash
+python scripts/train.py --config experiments/v1_no_complications.yaml \
+    --set model.clinical_backbone=tabm
+```
+
 ---
 
 ## FiLM Fusion
 
-After concatenating the three branch embeddings (256 + 32 + 32 = **320-dim**), a FiLM (Feature-wise Linear Modulation) layer applies a learned affine transformation:
+After concatenating the two branch embeddings (256 + 32 = **288-dim**), a FiLM (Feature-wise Linear Modulation) layer applies a learned affine transformation:
 
 ```
-γ, β = condition_net(fused)          # MLP: Linear(320,256)→ReLU→Dropout(0.3)→Linear(256,640)
+γ, β = condition_net(fused)          # MLP: Linear(288,256)→ReLU→Dropout(0.3)→Linear(256,576)
 γ = tanh(γ) × 0.3                    # clamp to (-0.3, +0.3)
 β = tanh(β) × 0.3
 fused = (1 + γ) × fused + β          # modulate
@@ -95,7 +113,7 @@ Each head produces a single **logit** per task (no log-variance). Confidence is 
 
 ### `reintervention_head`
 
-- `Linear(320, 256) → ReLU → Dropout(0.2) → Linear(256, 1)`
+- `Linear(288, 256) → ReLU → Dropout(0.2) → Linear(256, 1)`
 
 Predicted probability: `sigmoid(logit)`. Confidence: `2 × |prob − 0.5|` — zero when maximally uncertain (prob ≈ 0.5), one when certain (prob near 0 or 1). This is self-calibrating: if training produces well-separated probabilities, confidence is high automatically.
 
@@ -103,7 +121,7 @@ Predicted probability: `sigmoid(logit)`. Confidence: `2 × |prob − 0.5|` — z
 
 Only present when `complications` is not empty (multi-task variant). Produces one logit **per complication**:
 
-- `Linear(320, 256) → ReLU → Dropout(0.2) → Linear(256, n_comp)`
+- `Linear(288, 256) → ReLU → Dropout(0.2) → Linear(256, n_comp)`
 
 The 7 complications supported (`COMPLICATIONS_FULL`):
 
@@ -119,10 +137,20 @@ migration, infection
 ```python
 from src.models.reintervention import ReinterventionRiskModel
 
-# Primary-task model
+# Primary-task model (default MLP clinical backbone)
 model = ReinterventionRiskModel(clinical_dim=744, aaa_dim=5, complications=[])
 (logit,) = model(cta, clin, aaa)
 # logit: (B, 1) — reintervention logit
+# Internally: cat([clin * sigmoid(gate), aaa]) → clinical_branch → 32-dim
+
+# Primary-task model with TabM clinical backbone
+model = ReinterventionRiskModel(
+    clinical_dim=744, aaa_dim=5, complications=[],
+    clinical_backbone="tabm",
+    tabm_cfg=dict(k=16, n_blocks=2, d_block=128, dropout=0.3,
+                  num_embeddings="periodic", d_embedding=16),
+)
+(logit,) = model(cta, clin, aaa)
 
 # Multi-task model
 model = ReinterventionRiskModel(
@@ -132,8 +160,8 @@ model = ReinterventionRiskModel(
 logit, comp_logits = model(cta, clin, aaa)
 # comp_logits: (B, n_comp)
 
-# Return the fused 320-dim representation instead (useful for analysis)
-fused = model(cta, clin, aaa, return_fused=True)   # (B, 320)
+# Return the fused 288-dim representation instead (useful for analysis)
+fused = model(cta, clin, aaa, return_fused=True)   # (B, 288)
 ```
 
 ---
@@ -146,7 +174,9 @@ fused = model(cta, clin, aaa, return_fused=True)   # (B, 320)
 | BN-only adaptation (layer3/4) | Recalibrates feature statistics per scanner type with ~50 K params; avoids catastrophic forgetting while correcting scanner-domain bias |
 | FiLM clamped to ±0.3 | Allows meaningful cross-modal modulation (±30%) while staying stable during training |
 | Per-feature sigmoid gate (L1-regularised) | Soft feature selection over ~744 clinical features; interpretable — gate values can be inspected post-training |
-| Heteroscedastic log-variance, clamped [-4, 2] | Lets the model express calibrated confidence; quadratic penalty prevents degenerate high-uncertainty predictions |
+| AAA scalars appended after gate | 5 imaging-derived geometry scalars bypass the sparsity gate (they are always informative) but share the clinical MLP/TabM encoder, avoiding the overparameterisation of a dedicated 5→32→32 branch |
+| Plain focal BCE (no log-variance) | Simpler and equally effective; confidence is derived from `2×\|prob−0.5\|` which is self-calibrating without post-hoc tuning |
+| Configurable clinical backbone (MLP / TabM) | MLP is the proven default; TabM (parameter-efficient ensemble) can be swapped in via a single YAML key to benchmark stronger tabular DL |
 | F-beta (β=2) threshold | Weights recall 4× over precision — missing a reintervention is clinically worse than a false alarm |
 | Causal modality dropout | Encodes clinical constraint (AAA metrics cannot exist without CTA); forces all branches to develop independent representations |
 

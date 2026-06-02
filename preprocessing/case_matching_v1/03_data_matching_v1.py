@@ -205,7 +205,7 @@ def scan_paths(
     CT-only derivatives (label, dist_map, metrics, cfd) are omitted for non-CT modalities.
     """
     stem = f"{spss_id}_{site_abbr}_s{modality_index:03d}_{modality}"
-    base = Path(derivatives_base) / "training_subset_v2"
+    base = Path(derivatives_base) / "training_subset_v1"
     paths = {
         "file_stem": stem,
         "nifti":     str(base / "imagesTr" / f"{stem}.nii.gz"),
@@ -384,7 +384,7 @@ def build_multimodal_dataset_v1(
     session_index_json : str
         Output of 01_build_session_index.py (must include scan_date per session).
     derivatives_base : str
-        Root under which training_subset_v2/ will live.
+        Root under which training_subset_v1/ will live.
     output_json : str
         Destination for the completed radar_multimodal_config_v1.json.
     cfd_renamed_dir : str | None
@@ -898,12 +898,12 @@ if __name__ == "__main__":
         "1. RADAR_datebase_ARTinEVAR_v4, incl Bl_AAAdiam voor oude Rijnstate patienten.sav"
     )
     SESSION_INDEX = (
-        "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v2/"
+        "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1/"
         "clinical_data/session_index_v1.json"
     )
     DERIVATIVES_BASE = "/deepstore/datasets/mia/AI4EVAR/derivatives"
     OUTPUT_JSON = (
-        "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v2/"
+        "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1/"
         "clinical_data/radar_multimodal_config_v1.json"
     )
 

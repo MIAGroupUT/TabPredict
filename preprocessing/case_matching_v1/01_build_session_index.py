@@ -313,7 +313,7 @@ def build_session_index(DATA_ROOT: str) -> dict:
 if __name__ == "__main__":
     DATA_ROOT   = "/deepstore/datasets/mia/AI4EVAR/raw_data/RADAR_XNat/data"
     OUTPUT_JSON = (
-        "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v2/"
+        "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1/"
         "clinical_data/session_index_v1.json"
     )
 

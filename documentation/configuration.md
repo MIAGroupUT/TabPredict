@@ -23,6 +23,17 @@ model:
                               # ["endoleak_1a","endoleak_1b","endoleak_2","endoleak_3",
                               #  "endoleak_5","migration","infection"]
   aaa_dim: 5                  # number of AAA geometry metrics (do not change)
+  clinical_backbone: mlp      # mlp (default) | tabm
+  tabm:                       # only used when clinical_backbone: tabm
+    k: 16                     # ensemble members (paper default 32; 16 for small data)
+    n_blocks: 2               # MLP depth per ensemble member
+    d_block: 128              # hidden width per member
+    dropout: 0.3              # dropout inside each block
+    num_embeddings: periodic  # periodic (default) | none
+                              # periodic = PeriodicEmbeddings(lite=True): shared sinusoidal
+                              # frequencies across all features; 48 params vs ~35 K for
+                              # per-feature (lite=False) — right choice for 377 training samples
+    d_embedding: 16           # embedding dim per feature (only when num_embeddings: periodic)
 
 # ── Training ──────────────────────────────────────────────────────────────────
 training:
@@ -48,7 +59,7 @@ training:
 
   # Modality dropout (applied in both Stage A and Stage B training)
   modality_dropout:
-    p_cta: 0.10               # probability of zeroing CTA for a batch sample
+    p_cta: 0.0                # probability of zeroing CTA; set to 0 (CTA confirmed useful by ablation)
     p_aaa_given_cta: 0.15     # probability of zeroing AAA metrics when CTA is present
                               # (both p_aaa_given_cta and p_aaa_given_clin are checked
                               #  when CTA is present; AAA is kept when CTA is dropped)
@@ -78,7 +89,6 @@ training:
 # ── Paths ─────────────────────────────────────────────────────────────────────
 paths:
   base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  cache_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/monai_cache
   checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_no_complications
 
 # ── W&B ───────────────────────────────────────────────────────────────────────

@@ -348,6 +348,8 @@ def run_pipeline(cfg: dict) -> None:
         clinical_dim=len(feature_names),
         aaa_dim=cfg["model"].get("aaa_dim", 5),
         complications=complications,
+        clinical_backbone=cfg["model"].get("clinical_backbone", "mlp"),
+        tabm_cfg=cfg["model"].get("tabm") or {},
     ).to(DEVICE)
 
     if torch.cuda.device_count() > 1:
@@ -510,8 +512,10 @@ def run_pipeline(cfg: dict) -> None:
                         "feature_names": feature_names,
                         "clin_mean":     clin_mean.tolist(),
                         "clin_std":      clin_std.tolist(),
-                        "complications": complications,
-                        "config":        cfg,
+                        "complications":      complications,
+                        "clinical_backbone":  cfg["model"].get("clinical_backbone", "mlp"),
+                        "tabm_cfg":           cfg["model"].get("tabm") or {},
+                        "config":             cfg,
                     },
                     checkpoint_dir / f"best_stage_{st.lower()}.pt",
                 )

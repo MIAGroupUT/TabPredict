@@ -134,7 +134,7 @@ def generate_split(
 # RUN
 # =========================================================
 if __name__ == "__main__":
-    BASE_DIR    = "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v2"
+    BASE_DIR    = "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1"
     CONFIG_JSON = f"{BASE_DIR}/clinical_data/radar_multimodal_config_v1.json"
 
     generate_split(BASE_DIR, CONFIG_JSON, seed=3299, ratios=(0.7, 0.1, 0.2))

@@ -116,9 +116,12 @@ class ReinterventionRiskModel(nn.Module):
         clinical_dim: int = 744,
         aaa_dim: int = 5,
         complications: list[str] | None = None,
+        clinical_backbone: str = "mlp",
+        tabm_cfg: dict | None = None,
     ) -> None:
         super().__init__()
         self.complications = list(complications or [])
+        self.clinical_backbone = clinical_backbone
         num_comp = len(self.complications)
 
         # ── visual pathway ────────────────────────────────────────────────
@@ -130,22 +133,17 @@ class ReinterventionRiskModel(nn.Module):
         self.visual_proj = nn.Linear(2048, 256)
 
         # ── tabular pathways ─────────────────────────────────────────────
-        # Learned input gate: sigmoid(gate) ∈ (0,1) per feature.
+        # Learned input gate: sigmoid(gate) ∈ (0,1) per clinical feature only.
         # L1 reg during training pushes unimportant gates toward 0.
+        # AAA scalars bypass the gate and are appended after gating.
         self.feature_gate = nn.Parameter(torch.zeros(clinical_dim))
 
-        # Linear probe: single projection from gated features → 32-dim.
-        # No hidden layer by design — with ~37 training positives an MLP
-        # memorises the training set; a linear model cannot.
-        self.clinical_branch = nn.Linear(clinical_dim, 32)
-
-        self.aaa_metrics_branch = nn.Sequential(
-            nn.Linear(aaa_dim, 32), nn.ReLU(),
-            nn.Linear(32, 32), nn.ReLU(),
+        self.clinical_branch = self._build_clinical_branch(
+            clinical_dim + aaa_dim, clinical_backbone, tabm_cfg or {}
         )
 
         # ── fusion (FiLM) ────────────────────────────────────────────────
-        self._fusion_dim = 256 + 32 + 32  # 320
+        self._fusion_dim = 256 + 32  # 288
         self.condition_net = nn.Sequential(
             nn.Linear(self._fusion_dim, 256), nn.ReLU(),
             nn.Dropout(0.3),
@@ -167,6 +165,30 @@ class ReinterventionRiskModel(nn.Module):
             )
 
     # ── internal helpers ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def _build_clinical_branch(
+        clinical_dim: int,
+        backbone: str,
+        tabm_cfg: dict,
+    ) -> nn.Module:
+        """Return the clinical encoder branch for the requested backbone.
+
+        Both variants accept ``(B, clinical_dim)`` and return ``(B, 32)``.
+        """
+        if backbone == "tabm":
+            from src.models.tabm import TabMEmbed
+            return TabMEmbed(clinical_dim=clinical_dim, out_dim=32, **tabm_cfg)
+        if backbone == "mlp":
+            return nn.Sequential(
+                nn.Linear(clinical_dim, 128), nn.LayerNorm(128), nn.ReLU(),
+                nn.Dropout(0.3),
+                nn.Linear(128, 32),
+                nn.Dropout(0.2),
+            )
+        raise ValueError(
+            f"Unknown clinical_backbone {backbone!r}. Choose 'mlp' or 'tabm'."
+        )
 
     def _film(self, x: torch.Tensor, gamma_beta: torch.Tensor) -> torch.Tensor:
         gamma, beta = gamma_beta.chunk(2, dim=1)
@@ -196,10 +218,10 @@ class ReinterventionRiskModel(nn.Module):
         """
         cta   = self.cta_adapter(cta)
         v_emb = self.visual_proj(self._encode_visual(cta))
-        c_emb = self.clinical_branch(clin * torch.sigmoid(self.feature_gate))
-        a_emb = self.aaa_metrics_branch(aaa)
+        c_in  = torch.cat([clin * torch.sigmoid(self.feature_gate), aaa], dim=1)
+        c_emb = self.clinical_branch(c_in)
 
-        fused = torch.cat([v_emb, c_emb, a_emb], dim=1)
+        fused = torch.cat([v_emb, c_emb], dim=1)
         fused = self._film(fused, self.condition_net(fused))
         fused = self.fusion_norm(fused)
 

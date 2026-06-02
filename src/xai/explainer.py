@@ -156,16 +156,7 @@ class ReinterventionXAI:
         out_dir: Path,
     ) -> None:
         """Save axial / sagittal / coronal overlays as individual PNGs + one combined."""
-        ct    = cta[0, 0].cpu().numpy()
-        lumen = cta[0, 1].cpu().numpy() > 0.5
-        ilt   = cta[0, 2].cpu().numpy() > 0.5
-        D, H, W = ct.shape
-        views = {
-            "axial":    (ct[D//2],    cam_np[D//2],    lumen[D//2],    ilt[D//2]),
-            "sagittal": (ct[:, H//2], cam_np[:, H//2], lumen[:, H//2], ilt[:, H//2]),
-            "coronal":  (ct[:, :, W//2], cam_np[:, :, W//2],
-                         lumen[:, :, W//2], ilt[:, :, W//2]),
-        }
+        views = self._build_views(cta, cam_np)
 
         # Combined 3-panel
         fig, axes = plt.subplots(1, 3, figsize=(12, 4))
@@ -191,16 +182,7 @@ class ReinterventionXAI:
         """Return {key: wandb.Image} for W&B logging during training."""
         import wandb
 
-        ct    = cta[0, 0].cpu().numpy()
-        lumen = cta[0, 1].cpu().numpy() > 0.5
-        ilt   = cta[0, 2].cpu().numpy() > 0.5
-        D, H, W = ct.shape
-        views = {
-            "axial":    (ct[D//2],    cam_np[D//2],    lumen[D//2],    ilt[D//2]),
-            "sagittal": (ct[:, H//2], cam_np[:, H//2], lumen[:, H//2], ilt[:, H//2]),
-            "coronal":  (ct[:, :, W//2], cam_np[:, :, W//2],
-                         lumen[:, :, W//2], ilt[:, :, W//2]),
-        }
+        views  = self._build_views(cta, cam_np)
         images = {}
         for vname, sl in views.items():
             fig, ax = plt.subplots(figsize=(4, 4))
@@ -317,6 +299,47 @@ class ReinterventionXAI:
             if hasattr(mod, "layer4") and hasattr(mod, "layer1"):
                 return mod
         return None
+
+    @staticmethod
+    def _orient(arr: np.ndarray) -> np.ndarray:
+        """Transpose + vertical flip so anatomical superior/anterior is at image top.
+
+        For RAS data (axes = R, A, S):
+          sagittal slice (A, S) → (S, A): superior top, anterior right
+          coronal  slice (R, S) → (S, R): superior top, right at right
+          axial    slice (R, A) → (A, R): anterior top, right at right
+        The same flipud(T) operation achieves the correct display for all three planes.
+        """
+        return np.flipud(arr.T)
+
+    @staticmethod
+    def _build_views(cta: torch.Tensor, cam_np: np.ndarray) -> dict:
+        """Extract and orient the three anatomical planes from a RAS-ordered volume.
+
+        Data layout after Orientationd(axcodes='RAS'):
+          axis 0 (D) = R (right),  axis 1 (H) = A (anterior),  axis 2 (W) = S (superior)
+
+        Returns an ordered dict: sagittal → coronal → axial, each value is a tuple of
+        four oriented 2-D arrays (ct, cam, lumen_mask, ilt_mask) ready for _render_slice.
+        """
+        ct    = cta[0, 0].cpu().numpy()
+        lumen = cta[0, 1].cpu().numpy() > 0.5
+        ilt   = cta[0, 2].cpu().numpy() > 0.5
+        D, H, W = ct.shape
+        o = ReinterventionXAI._orient
+
+        def _s(arrays, idx):
+            return tuple(o(a[idx]) for a in arrays)
+
+        arrs = (ct, cam_np, lumen, ilt)
+        return {
+            # slice along R axis → sagittal plane (A × S)
+            "sagittal": _s(arrs, (D//2, slice(None), slice(None))),
+            # slice along A axis → coronal plane (R × S)
+            "coronal":  _s(arrs, (slice(None), H//2, slice(None))),
+            # slice along S axis → axial plane (R × A)
+            "axial":    _s(arrs, (slice(None), slice(None), W//2)),
+        }
 
     @staticmethod
     def _render_slice(

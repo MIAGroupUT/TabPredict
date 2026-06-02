@@ -62,6 +62,10 @@ tqdm==4.67.3
 einops==0.8.2               # Tensor rearrangement (used in Merlin attention)
 PyYAML==6.0.3               # Config file parsing
 
+# ── Tabular deep learning ─────────────────────────────────────────────────────
+tabm==0.0.3                       # TabM: parameter-efficient tabular ensembling (Gorishniy et al., 2024)
+rtdl_num_embeddings==0.0.12       # PeriodicEmbeddings for TabM numerical feature encoding
+
 # ── Testing ───────────────────────────────────────────────────────────────────
 pytest==9.0.3
 

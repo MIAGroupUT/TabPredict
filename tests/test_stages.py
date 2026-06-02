@@ -175,11 +175,9 @@ def test_set_stage_a_trains_clinical_branch(fresh_model_no_comp):
         assert p.requires_grad
 
 
-def test_set_stage_a_trains_aaa_branch(fresh_model_no_comp):
-    from src.training.stages import set_stage_a
-    set_stage_a(fresh_model_no_comp)
-    for p in fresh_model_no_comp.aaa_metrics_branch.parameters():
-        assert p.requires_grad
+def test_set_stage_a_no_aaa_branch(fresh_model_no_comp):
+    """aaa_metrics_branch has been merged into clinical_branch; attribute must not exist."""
+    assert not hasattr(fresh_model_no_comp, "aaa_metrics_branch")
 
 
 def test_set_stage_a_trains_reintervention_head(fresh_model_no_comp):
@@ -251,20 +249,20 @@ def test_build_optimizer_returns_adamw(fresh_model_no_comp):
 def test_build_optimizer_stage_a_group_count(fresh_model_no_comp):
     from src.training.stages import build_optimizer
     opt = build_optimizer(fresh_model_no_comp, "A")
-    assert len(opt.param_groups) == 6  # tabular + fusion only; no cta_adapter/visual_proj
+    assert len(opt.param_groups) == 5  # tabular + fusion only; no aaa branch or visual pathway
 
 
 def test_build_optimizer_stage_a_with_comp_group_count(fresh_model_with_comp):
     from src.training.stages import build_optimizer
     opt = build_optimizer(fresh_model_with_comp, "A")
-    assert len(opt.param_groups) == 7  # includes complications_head
+    assert len(opt.param_groups) == 6  # includes complications_head
 
 
 def test_build_optimizer_stage_b_group_count(fresh_model_no_comp):
     from src.training.stages import build_optimizer, set_stage_b
     set_stage_b(fresh_model_no_comp)
     opt = build_optimizer(fresh_model_no_comp, "B")
-    assert len(opt.param_groups) == 10  # tabular + cta_adapter + visual_proj + i3resnet_bn + i3resnet_layer4 + head
+    assert len(opt.param_groups) == 8  # tabular + cta_adapter + visual_proj + i3resnet_bn + head
 
 
 def test_build_optimizer_stage_b_i3resnet_bn_lr(fresh_model_no_comp):

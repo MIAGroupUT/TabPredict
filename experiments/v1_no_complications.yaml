@@ -1,15 +1,13 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Experiment: v1_no_complications:
-#   - WeightedRandomSampler added      (50/50 balanced batches)
-#   - clinical_branch: MLP → linear probe  (no hidden layer; prevents overfitting
-#                                            with ~37 training positives)
-#   - gate_l1_weight 0.0005 → 0.005   (10× sparsity; forces gate to ~20-30 features)
-#   - focal_gamma 2.0 → 3.0           (harder gradient on mid-prob hard examples)
-#   - pos_weight 1.0 → 2.0            (asymmetric gradient favouring recall)
-#   - p_cta 0.10 → 0.0               (CTA confirmed useful by ablation; stop dropping it)
-#   - reintervention_head output: 2 → 1  (remove logvar; plain focal BCE)
-#   - confidence: logvar-based → 2*|prob-0.5|  (self-calibrating; no post-hoc tuning)
-#   - Stage B: layer4 conv unfrozen   (task-specific fine-tuning of Merlin backbone)
+# Experiment: v1_no_complications (v3 hyperparams):
+#   - WeightedRandomSampler added      (50/50 balanced batches; replaces inflated pos_weight)
+#   - pos_weight 1.0; WRS handles class balance — no double-correction
+#   - gate_l1_weight 0.0005            (gentle sparsity; 0.005 zeroed too many features)
+#   - focal_gamma 2.0                  (γ=3 destabilised training under 50/50 sampler)
+#   - p_cta 0.0                        (CTA confirmed useful by ablation; never drop)
+#   - reintervention_head output: 1    (remove logvar; plain focal BCE)
+#   - confidence: 2*|prob-0.5|         (self-calibrating; no post-hoc tuning)
+#   - Stage B: BN-only adaptation      (layer4 conv fine-tune hurt with ~37 positives)
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: v1_no_complications
@@ -24,6 +22,14 @@ model:
   with_complications: false
   complications: []
   aaa_dim: 5
+  clinical_backbone: tabm        # mlp | tabm
+  tabm:                         # only used when clinical_backbone: tabm
+    k: 16                       # ensemble members (paper default 32; 16 for small data)
+    n_blocks: 2
+    d_block: 128
+    dropout: 0.3
+    num_embeddings: periodic    # periodic | none  (PeriodicEmbeddings lite=True)
+    d_embedding: 16             # embedding dim per feature
 
 training:
   seed: 3299
@@ -36,10 +42,10 @@ training:
   val_cache_rate: 1.0
 
   # Loss hyperparameters
-  focal_gamma: 3.0           # harder gradient on mid-prob borderline examples
+  focal_gamma: 2.0
   label_smoothing: 0.02
-  pos_weight: 2.0            # asymmetric gradient favouring recall over precision
-  gate_l1_weight: 0.005      # 10× sparsity forces gate to ~20-30 features (37 train pos)
+  pos_weight: 1.0            # WRS already balances batches 50/50; raw ratio (314/63=4.98) must NOT be used
+  gate_l1_weight: 0.0005     # gentle sparsity; 63 train positives → keep conservative
   recall_beta: 2.0           # checkpoint saved by F2-score (recall-weighted)
   threshold_recall_target: 0.80  # threshold saved = smallest t giving ≥80% recall on val
 
@@ -48,7 +54,7 @@ training:
     p_cta: 0.0               # CTA confirmed useful by ablation; never drop it
     p_aaa_given_cta: 0.15
     p_aaa_given_clin: 0.15
-    p_clinical: 0.15         # 0.30 too aggressive with only ~37 train positives
+    p_clinical: 0.15         # 0.30 too aggressive; 63 train positives is still small
 
   xai_every_n_epochs: 3
   xai_samples: 4
@@ -67,9 +73,9 @@ training:
 
 paths:
   base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_no_complications
+  checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_no_complications_TabM_02062026
 
 wandb:
   project: AAA-Reintervention-Risk
-  run_name: v1_no_complications
+  run_name: v1_no_complications_tabm
   mode: online

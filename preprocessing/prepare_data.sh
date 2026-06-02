@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH -c 6
+#SBATCH -c 12
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:0
 #SBATCH --mem=180G
 #SBATCH --time=180:00:00
 #SBATCH --partition=mia,mia-pof,am
@@ -20,7 +20,7 @@ source /etc/profile.d/modules.sh
 module load anaconda3/2025.06
 export HTTPS_PROXY="http://proxy.utwente.nl:3128"
 
-cd $HOME/AI4EVAR/ai4evar/preprocessing/case_matching_v2
+cd $HOME/AI4EVAR/ai4evar/preprocessing/case_matching_v1
 # -------------------------
 # SLURM runtime env
 # -------------------------
@@ -43,12 +43,12 @@ source activate ai4evar
 # srun -u $HOME/.conda/envs/ai4evar/bin/python -m 03_data_matching_v1
 # srun -u $HOME/.conda/envs/ai4evar/bin/python -m 04_data_organizing 
 # srun -u $HOME/.conda/envs/ai4evar/bin/python -m 05_nnUNet_labels_metrics_generation \
-#     --input "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v2/imagesTr" \
-#     --output-dir "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v2" \
+#     --input "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1/imagesTr" \
+#     --output-dir "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1" \
 #     --checkpoint-dir "/deepstore/datasets/mia/AI4EVAR/nnUNet/nnUNet_results/Dataset001_AAA_RADAR" \
 #     --device "cuda"
 srun -u $HOME/.conda/envs/ai4evar/bin/python -m 06_crop_full_body_scans \
-    --input-dir /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v2 \
+    --input-dir /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1 \
     --suffix _cropped #--dry-run
 # srun -u $HOME/.conda/envs/ai4evar/bin/python -m 07_generate_data_split 
 

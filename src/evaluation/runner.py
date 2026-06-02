@@ -88,7 +88,9 @@ def run_test(
     clin_std      = np.array(ckpt["clin_std"])
     threshold     = float(ckpt.get("threshold", 0.5))
     # Complications come from checkpoint (authoritative) or fall back to config
-    complications = ckpt.get("complications") or list(cfg["model"].get("complications") or [])
+    complications      = ckpt.get("complications") or list(cfg["model"].get("complications") or [])
+    clinical_backbone  = ckpt.get("clinical_backbone") or cfg["model"].get("clinical_backbone", "mlp")
+    tabm_cfg           = ckpt.get("tabm_cfg") or cfg["model"].get("tabm") or {}
 
     disable_cta = bool(cfg.get("training", {}).get("disable_cta", False))
     log(f"Threshold  : {threshold:.4f}  (from checkpoint)")
@@ -121,6 +123,8 @@ def run_test(
         clinical_dim=len(feature_names),
         aaa_dim=cfg["model"].get("aaa_dim", 5),
         complications=complications,
+        clinical_backbone=clinical_backbone,
+        tabm_cfg=tabm_cfg,
     ).to(DEVICE)
     load_checkpoint(model, checkpoint_path, device=DEVICE)
     model.eval()

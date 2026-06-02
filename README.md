@@ -28,8 +28,12 @@ pip install -r requirements.txt
 ```bash
 cd /home/ranema/AI4EVAR/ai4evar
 
-# Train — primary-task model (reintervention only)
+# Train — primary-task model (reintervention only, default MLP clinical backbone)
 python scripts/train.py --config experiments/v1_no_complications.yaml
+
+# Train with TabM clinical backbone (no YAML edit needed)
+python scripts/train.py --config experiments/v1_no_complications.yaml \
+    --set model.clinical_backbone=tabm
 
 # Train — multi-task model (reintervention + 7 complications)
 python scripts/train.py --config experiments/v1_with_complications.yaml
@@ -72,7 +76,7 @@ ai4evar/
 │   ├── xai/              # Gradient-based explainability
 │   └── evaluation/       # Metrics + per-patient output
 ├── preprocessing/        # Data preparation scripts (00–06)
-├── tests/                # CPU-only pytest suite (259 tests)
+├── tests/                # CPU-only pytest suite (269 tests)
 └── documentation/        # Detailed technical documentation
 ```
 

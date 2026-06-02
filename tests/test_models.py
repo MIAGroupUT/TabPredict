@@ -120,12 +120,12 @@ def test_forward_with_comp_all_finite(model_with_comp, cta, clin, aaa):
 def test_return_fused_no_comp(model_no_comp, cta, clin, aaa):
     fused = model_no_comp(cta, clin, aaa, return_fused=True)
     assert isinstance(fused, torch.Tensor)
-    assert fused.shape == (BATCH, 320)  # 256 + 32 + 32
+    assert fused.shape == (BATCH, 288)  # 256 + 32
 
 
 def test_return_fused_with_comp(model_with_comp, cta, clin, aaa):
     fused = model_with_comp(cta, clin, aaa, return_fused=True)
-    assert fused.shape == (BATCH, 320)
+    assert fused.shape == (BATCH, 288)
 
 
 # ── model attributes ──────────────────────────────────────────────────────────
@@ -206,7 +206,7 @@ def test_load_checkpoint_strict_raises_on_missing(tmp_path, fresh_model_no_comp)
 
 def test_film_multiplicative_scale_clamped(fresh_model_no_comp):
     """With extreme γ, the multiplicative factor saturates to exactly 1.3 (tanh→1)."""
-    fusion_dim = 320
+    fusion_dim = 288
     x          = torch.rand(BATCH, fusion_dim)
     gamma_beta = torch.full((BATCH, fusion_dim * 2), 1e6)   # saturates tanh to +1
 
@@ -217,7 +217,7 @@ def test_film_multiplicative_scale_clamped(fresh_model_no_comp):
 
 def test_film_additive_shift_positive_bound(fresh_model_no_comp):
     """Additive shift with extreme positive β and zero input must equal +0.3."""
-    fusion_dim = 320
+    fusion_dim = 288
     x          = torch.zeros(BATCH, fusion_dim)
     gamma_beta = torch.full((BATCH, fusion_dim * 2), 1e6)
 
@@ -227,9 +227,75 @@ def test_film_additive_shift_positive_bound(fresh_model_no_comp):
 
 def test_film_additive_shift_negative_bound(fresh_model_no_comp):
     """Additive shift with extreme negative β and zero input must equal -0.3."""
-    fusion_dim = 320
+    fusion_dim = 288
     x          = torch.zeros(BATCH, fusion_dim)
     gamma_beta = torch.full((BATCH, fusion_dim * 2), -1e6)  # tanh→-1 → shift=-0.3
 
     result = fresh_model_no_comp._film(x, gamma_beta)
     assert torch.allclose(result, torch.full_like(result, -0.3), atol=1e-4)
+
+
+# ── TabM clinical backbone ────────────────────────────────────────────────────
+
+_TABM_CFG = dict(k=4, n_blocks=1, d_block=32, dropout=0.0, num_embeddings="periodic", d_embedding=8)
+
+
+@pytest.fixture(scope="module")
+def model_tabm_no_comp():
+    from src.models.reintervention import ReinterventionRiskModel
+    return ReinterventionRiskModel(
+        clinical_dim=CLINICAL_DIM, aaa_dim=AAA_DIM, complications=[],
+        clinical_backbone="tabm", tabm_cfg=_TABM_CFG,
+    ).eval()
+
+
+@pytest.fixture(scope="module")
+def model_tabm_with_comp():
+    from src.models.reintervention import ReinterventionRiskModel
+    return ReinterventionRiskModel(
+        clinical_dim=CLINICAL_DIM, aaa_dim=AAA_DIM, complications=COMPLICATIONS,
+        clinical_backbone="tabm", tabm_cfg=_TABM_CFG,
+    ).eval()
+
+
+def test_tabm_model_builds(model_tabm_no_comp):
+    assert model_tabm_no_comp is not None
+
+
+def test_tabm_model_stores_backbone(model_tabm_no_comp):
+    assert model_tabm_no_comp.clinical_backbone == "tabm"
+
+
+def test_tabm_forward_no_comp_shape(model_tabm_no_comp, cta, clin, aaa):
+    out = model_tabm_no_comp(cta, clin, aaa)
+    assert len(out) == 1
+    assert out[0].shape == (BATCH, 1)
+
+
+def test_tabm_forward_with_comp_shape(model_tabm_with_comp, cta, clin, aaa):
+    out = model_tabm_with_comp(cta, clin, aaa)
+    assert len(out) == 2
+    assert out[0].shape == (BATCH, 1)
+    assert out[1].shape == (BATCH, N_COMP)
+
+
+def test_tabm_forward_finite(model_tabm_no_comp, cta, clin, aaa):
+    out = model_tabm_no_comp(cta, clin, aaa)
+    assert torch.isfinite(out[0]).all()
+
+
+def test_tabm_clinical_branch_output_dim(model_tabm_no_comp, clin, aaa):
+    """clinical_branch must output (B, 32) regardless of backbone."""
+    gated = clin * torch.sigmoid(model_tabm_no_comp.feature_gate)
+    c_in  = torch.cat([gated, aaa], dim=1)
+    emb   = model_tabm_no_comp.clinical_branch(c_in)
+    assert emb.shape == (BATCH, 32)
+
+
+def test_unknown_backbone_raises():
+    from src.models.reintervention import ReinterventionRiskModel
+    with pytest.raises(ValueError, match="Unknown clinical_backbone"):
+        ReinterventionRiskModel(
+            clinical_dim=CLINICAL_DIM, aaa_dim=AAA_DIM,
+            clinical_backbone="unknown",
+        )

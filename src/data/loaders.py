@@ -96,7 +96,6 @@ def _clean_clinical_features(feat_dict: dict) -> dict:
 
 
 # ── dataset builder ──────────────────────────────────────────────────────────
-
 def build_data_list(
     ids: list[str],
     base_dir: Path,
@@ -124,14 +123,15 @@ def build_data_list(
             np.array([clin_dict.get(k, 0.0) for k in feature_keys], dtype=np.float32)
         )
 
-        aaa_metrics = _load_aaa_metrics(base_dir / "metricsTr" / f"{pid}.json")
+        pre_op      = (pdata.get("scans", {}).get("pre_op")) or {}
+        aaa_metrics = _load_aaa_metrics(pre_op.get("metrics"))
         gt          = pdata.get("ground_truth", {})
         reint_label = float(gt.get("reintervention", 0))
 
         sample: dict[str, Any] = {
-            "ct":                   str(base_dir / "imagesTr"   / f"{pid}.nii.gz"),
-            "lbl":                  str(base_dir / "labelsTr"   / f"{pid}.nii.gz"),
-            "dst":                  str(base_dir / "distMapsTr" / f"{pid}.nii.gz"),
+            "ct":                   str(pre_op.get("nifti")),
+            "lbl":                  str(pre_op.get("label")),
+            "dst":                  str(pre_op.get("dist_map")),
             "clin":                 clin,
             "aaa_metrics":          aaa_metrics,
             "reintervention_label": np.array([reint_label], dtype=np.float32),
@@ -145,7 +145,10 @@ def build_data_list(
     return data
 
 
-def _load_aaa_metrics(path: Path) -> list[float]:
+def _load_aaa_metrics(path) -> list[float]:
+    if path is None:
+        return [0.0] * 5
+    path = Path(path)
     if not path.exists():
         return [0.0] * 5
     with open(path) as f:
@@ -204,7 +207,7 @@ def get_cached_transforms(
     return Compose([
         LoadImaged(keys=["ct", "lbl", "dst"]),
         EnsureChannelFirstd(keys=["ct", "lbl", "dst"]),
-        Orientationd(keys=["ct", "lbl", "dst"], axcodes="RAS"),
+        Orientationd(keys=["ct", "lbl", "dst"], axcodes="RAS", labels=None),
         Spacingd(
             keys=["ct", "lbl", "dst"],
             pixdim=spacing,

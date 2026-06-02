@@ -46,6 +46,7 @@ Usage
 """
 
 import argparse
+import shutil
 from pathlib import Path
 
 import nibabel as nib
@@ -148,8 +149,30 @@ def process_scan(
     label_path = output_base / "labelsTr"   / f"{stem}.nii.gz"
     dist_path  = output_base / "distMapsTr" / f"{stem}.nii.gz"
 
+    # Pre-compute suffixed output paths (needed for both crops and copies)
+    out_images = output_base / f"imagesTr{suffix}"
+    out_labels = output_base / f"labelsTr{suffix}"
+    out_dists  = output_base / f"distMapsTr{suffix}"
+    out_ct     = out_images / ct_path.name
+    out_label  = out_labels / label_path.name
+    out_dist   = out_dists  / dist_path.name
+
+    def _copy_available(note: str) -> str:
+        """Copy existing source files to the suffixed dirs (skip-but-copy path)."""
+        if suffix and not dry_run:
+            for src, dst in [(ct_path, out_ct), (label_path, out_label), (dist_path, out_dist)]:
+                if src.exists():
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(src, dst)
+        action = "would copy" if dry_run else "copied"
+        return f"[SKIP] {stem}\n        {note}\n        {action} to imagesTr{suffix}/ (unchanged)"
+
     if not label_path.exists():
-        return f"[SKIP] {stem}\n        no label mask — run step 05 first"
+        if suffix and not dry_run:
+            out_ct.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ct_path, out_ct)
+        action = "would copy CT only" if dry_run else "copied CT only"
+        return f"[SKIP] {stem}\n        no label mask — run step 05 first\n        {action} (label absent)"
 
     # Load label as uint8 to find axial extent of the aorta
     lbl_img  = nib.load(str(label_path))
@@ -166,7 +189,7 @@ def process_scan(
     nonzero      = np.where(aorta_slices)[0]
 
     if len(nonzero) == 0:
-        return f"[SKIP] {stem}\n        empty segmentation mask"
+        return _copy_available("empty segmentation mask")
 
     z_min  = int(nonzero[0])
     z_max  = int(nonzero[-1])
@@ -177,9 +200,8 @@ def process_scan(
     # Skip scans that are already tightly cropped around the aorta
     coverage = extent / total
     if coverage >= skip_threshold:
-        return (
-            f"[SKIP] {stem}\n"
-            f"        aorta {z_min}–{z_max} ({extent} sl) covers "
+        return _copy_available(
+            f"aorta {z_min}–{z_max} ({extent} sl) covers "
             f"{coverage:.1%} of {total} sl ({total * axial_voxel_mm:.0f} mm) "
             f"— already focused (threshold {skip_threshold:.0%})"
         )
@@ -217,13 +239,6 @@ def process_scan(
 
     def fmt_shape(s):
         return f"{s[0]}×{s[1]}×{s[2]}"
-
-    out_images = output_base / f"imagesTr{suffix}"
-    out_labels = output_base / f"labelsTr{suffix}"
-    out_dists  = output_base / f"distMapsTr{suffix}"
-    out_ct     = out_images / ct_path.name
-    out_label  = out_labels / label_path.name
-    out_dist   = out_dists  / dist_path.name
 
     has_dist   = dist_path.exists()
     files_line = f"imagesTr{suffix}/ + labelsTr{suffix}/"
@@ -302,10 +317,13 @@ def main() -> None:
             f"[!] labelsTr/ not found under {base} — run step 05 first"
         )
 
-    ct_scans = sorted(p for p in images_dir.iterdir() if p.name.endswith("_CT.nii.gz"))
-    print(f"Found {len(ct_scans)} CT scan(s) in {images_dir}")
+    all_scans = sorted(p for p in images_dir.iterdir() if p.name.endswith(".nii.gz"))
+    ct_scans  = [p for p in all_scans if p.name.endswith("_CT.nii.gz")]
+    other_scans = [p for p in all_scans if not p.name.endswith("_CT.nii.gz")]
+
+    print(f"Found {len(ct_scans)} CT scan(s) and {len(other_scans)} other modality file(s) in {images_dir}")
     if suffix:
-        print(f"Output suffix: '{suffix}'  →  imagesTr{suffix}/, labelsTr{suffix}/, distMapsTr{suffix}/")
+        print(f"Output suffix: '{suffix}'  →  imagesTr{suffix}/ (CT: crop or copy; other modalities: copy verbatim)")
     else:
         print("No suffix — files will be overwritten in-place.")
     if args.dry_run:
@@ -328,11 +346,26 @@ def main() -> None:
         else:
             n_skipped += 1
 
+    # Copy non-CT modality files verbatim when writing to a suffixed directory.
+    # These files have no segmentation mask so cropping is not applicable.
+    n_other = 0
+    if suffix and other_scans:
+        out_images = base / f"imagesTr{suffix}"
+        print(f"\nCopying {len(other_scans)} non-CT file(s) to imagesTr{suffix}/ ...")
+        for src in other_scans:
+            dst = out_images / src.name
+            if not dry_run:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+            n_other += 1
+        action = "would copy" if args.dry_run else "copied"
+        print(f"  {action} {n_other} non-CT file(s)")
+
     print(f"\n{'=' * 62}")
     if args.dry_run:
-        print(f"DRY RUN complete — would crop {n_cropped}, skip {n_skipped}")
+        print(f"DRY RUN complete — would crop {n_cropped}, skip {n_skipped}, copy {n_other} non-CT")
     else:
-        print(f"DONE — cropped {n_cropped}, skipped {n_skipped}")
+        print(f"DONE — cropped {n_cropped}, skipped {n_skipped}, copied {n_other} non-CT")
     print(f"{'=' * 62}")
 
 
@@ -342,7 +375,7 @@ def main() -> None:
 if __name__ == "__main__":
     import sys
 
-    INPUT_DIR = "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v2"
+    INPUT_DIR = "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1"
 
     # Inject --input-dir when not supplied (e.g. python 06_crop_full_body_scans.py --suffix _cropped)
     if "--input-dir" not in sys.argv:
