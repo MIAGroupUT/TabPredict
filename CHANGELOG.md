@@ -51,7 +51,7 @@ _No unreleased changes._
 - **`set_stage_a` / `set_stage_b`** in `stages.py`: removed the `aaa_metrics_branch` freeze/unfreeze blocks (attribute no longer exists on the model).
 - **`build_optimizer` param groups reduced**: Stage A 6 → 5 (no-comp), 7 → 6 (with-comp); Stage B 9 → 8. Removed the `"aaa"` param group in both stages.
 - **`print_model_param_overview`**: removed `aaa_metrics_branch` row.
-- **Architecture docs comprehensively updated** (`documentation/architecture.md`, `CLAUDE.md`): diagram now shows two-branch fusion at 288-dim; new "Tabular Branch" section explains gate-then-append design; "Why merge?" rationale added to key-design-choices table; all head/FiLM dim references corrected 320 → 288.
+- **Architecture docs comprehensively updated** (`documentation/architecture.md`): diagram now shows two-branch fusion at 288-dim; new "Tabular Branch" section explains gate-then-append design; "Why merge?" rationale added to key-design-choices table; all head/FiLM dim references corrected 320 → 288.
 - **Actual split stats updated** across both experiment configs and comments: train N=377, 63 positives, 314 negatives (raw `pos_weight` ratio = 4.98 — must not be used with WRS). Previous comments referenced "~37 training positives" from an outdated estimate.
 - **Checkpoint directories renamed**: `v1_no_complications` → `v1_no_complications_02062026`, `v1_with_complications` → `v1_with_complications_02062026`, to keep new-split runs cleanly separated from prior checkpoints.
 - **`cache_dir` removed** from paths config (both YAMLs and `configuration.md`). Was already unused in `trainer.py` after a previous cleanup; stale key removed.
@@ -154,7 +154,7 @@ _No unreleased changes._
 - **nnUNet cwd crash** (`05_nnUNet_labels_metrics_generation.py`). nnUNet internally `chdir`s during inference; after the first scan's temp dir was deleted by `shutil.rmtree`, the next `multiprocessing.Pool` spawn called `os.getcwd()` on a non-existent path, raising `FileNotFoundError`. Fixed by calling `os.chdir(output_base)` before each `predict_from_files` call to keep the process cwd pinned to a stable directory.
 - **nnUNet missing env-var warnings** (`05_nnUNet_labels_metrics_generation.py`). `nnunetv2` checks `nnUNet_raw`, `nnUNet_preprocessed`, and `nnUNet_results` at import time and prints loud warnings if unset. Fallback values are now set with `os.environ.setdefault` before the import, suppressing the noise without overriding real environment values.
 - Removed stale misleading comment in `losses.py` that claimed `WeightedRandomSampler` was already in use (it was not).
-- All documentation (`architecture.md`, `configuration.md`, `data.md`, `training.md`, `testing.md`, `CLAUDE.md`) updated to reflect new geometry, regularisation values, FiLM clamp, checkpoint criterion, and WeightedRandomSampler.
+- All documentation (`architecture.md`, `configuration.md`, `data.md`, `training.md`, `testing.md`) updated to reflect new geometry, regularisation values, FiLM clamp, checkpoint criterion, and WeightedRandomSampler.
 
 ---
 
