@@ -352,15 +352,18 @@ def main() -> None:
     n_other = 0
     if suffix and other_scans:
         out_images = base / f"imagesTr{suffix}"
-        print(f"\nCopying {len(other_scans)} non-CT file(s) to imagesTr{suffix}/ ...")
+        print(f"\nCopying {len(other_scans)} non-CT file(s) to imagesTr{suffix}/ ...", flush=True)
         for src in other_scans:
             dst = out_images / src.name
             if not args.dry_run:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, dst)
             n_other += 1
+            if n_other % 50 == 0:
+                action = "would copy" if args.dry_run else "copied"
+                print(f"  {action} {n_other}/{len(other_scans)} ...", flush=True)
         action = "would copy" if args.dry_run else "copied"
-        print(f"  {action} {n_other} non-CT file(s)")
+        print(f"  {action} {n_other}/{len(other_scans)} non-CT file(s) — done", flush=True)
 
     # ── AAA geometry metrics (metricsTr/) ─────────────────────────────────────
     # JSON files are derived from the label masks, not the CT volume, so they
