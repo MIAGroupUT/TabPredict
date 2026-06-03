@@ -148,7 +148,7 @@ sinfo -p mia --format="%N %G %t"
 
 **W&B not syncing:** Check that the proxy is set. On the login node: `export HTTPS_PROXY=http://proxy.utwente.nl:3128` then test with `curl -I https://api.wandb.ai`.
 
-**Out of memory:** Reduce `training.batch_size` or `training.num_workers` via `--set`. Default batch size is 8 with 32 CPUs.
+**Out of memory:** The most common cause is RAM exhaustion from persistent DataLoader workers accumulating RSS over epochs (Python copy-on-write degradation). Current defaults are `num_workers=4` (`v1_no_complications`) and `num_workers=6` (`v1_with_complications`) with `prefetch_factor=1`. If kills still occur, reduce further via `--set training.num_workers=2`. Also consider reducing `training.batch_size` or `training.train_cache_rate`.
 
 **Job pending too long:** Try a different partition (`--partition mia-pof` or `--partition am`) or reduce resource requests.
 

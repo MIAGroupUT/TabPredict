@@ -28,9 +28,16 @@ from monai.transforms import (
     LoadImaged,
     MapTransform,
     Orientationd,
+    RandAdjustContrastd,
+    RandAffined,
     RandBiasFieldd,
+    RandFlipd,
     RandGaussianNoised,
+    RandGaussianSmoothd,
+    RandRotate90d,
     RandScaleIntensityd,
+    RandShiftIntensityd,
+    RandZoomd,
     ScaleIntensityRanged,
     Spacingd,
     SpatialPadd,
@@ -42,6 +49,14 @@ DEFAULT_SIZE    = (224, 224, 160)
 DEFAULT_SPACING = (1.5, 1.5, 3)
 DEFAULT_HU_MIN  = -1000
 DEFAULT_HU_MAX  =  1000
+
+# Sentinel values used in RADAR to denote "not measured / not applicable".
+# Treating these as real numbers corrupts z-normalisation statistics.
+_SENTINEL_VALUES: frozenset = frozenset({999.0, 9999.0, 99999.0})
+
+# Features that carry no clinical signal and must be dropped before training.
+# PatientNr is a database ID (up to ~1e8) with no clinical meaning.
+_EXCLUDE_FEATURES: frozenset = frozenset({"PatientNr"})
 
 # ── I/O helpers ──────────────────────────────────────────────────────────────
 
@@ -58,7 +73,12 @@ def load_splits_and_config(base_dir: Path) -> tuple[dict, dict, list[str]]:
         config = json.load(f)
 
     first_pid = list(config.keys())[0]
-    feature_names = sorted(config[first_pid]["pre_op_features"].keys())
+    # Derive feature names BEFORE cleaning so we can filter excluded features.
+    # _EXCLUDE_FEATURES (e.g. PatientNr) are dropped here and never seen by the model.
+    feature_names = sorted(
+        k for k in config[first_pid]["pre_op_features"].keys()
+        if k not in _EXCLUDE_FEATURES
+    )
 
     for pid in config:
         if "pre_op_features" in config[pid]:
@@ -74,24 +94,54 @@ def compute_clin_stats(
     config: dict,
     feature_names: list[str],
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Compute per-feature mean and std from the training split."""
+    """Compute per-feature mean and std from the training split.
+
+    NaN values (missing measurements, sentinel-replaced values) are excluded
+    from the statistics so they do not corrupt the mean or std of real values.
+    Features that are 100% missing receive mean=0, std=1 so they normalise
+    to z=0 for every patient and the gate can cheaply zero them out.
+    """
     matrix = np.stack([
         np.array(
-            [config[pid]["pre_op_features"].get(k, 0.0) for k in feature_names],
+            [config[pid]["pre_op_features"].get(k, np.nan) for k in feature_names],
             dtype=np.float32,
         )
         for pid in train_ids
     ])
-    return matrix.mean(axis=0), matrix.std(axis=0) + 1e-8
+    mean = np.nanmean(matrix, axis=0)
+    std  = np.nanstd(matrix,  axis=0)
+    # All-NaN column (100% missing feature): nanmean/nanstd return NaN — set neutral values
+    mean = np.where(np.isnan(mean), 0.0, mean)
+    std  = np.where(np.isnan(std),  1.0, std)
+    return mean.astype(np.float32), (std + 1e-8).astype(np.float32)
 
 
 def _clean_clinical_features(feat_dict: dict) -> dict:
+    """Convert raw RADAR feature values to float, replacing bad values with NaN.
+
+    Handles three classes of problematic values:
+    - Sentinel codes (999, 9999, 99999): RADAR uses these for "not measured".
+      Treating them as real numbers corrupts z-normalisation statistics.
+    - Non-numeric strings (date fields like "2010-12-07", free text): silently
+      became 0.0 before; now become NaN.
+    - Excluded features (PatientNr): database IDs with no clinical meaning.
+
+    NaN values propagate to NormalizeClinicald which imputes them to z=0
+    (the training-set mean), the most agnostic choice for missing data.
+    """
     cleaned = {}
     for k, v in feat_dict.items():
+        if k in _EXCLUDE_FEATURES:
+            continue
         try:
-            cleaned[k] = float(v) if v not in ("", None) else 0.0
+            f = float(v) if v not in ("", None) else np.nan
+            # Sentinel → NaN (do not use isnan check on f before membership test;
+            # NaN is not in the frozenset so the order here is safe)
+            if not np.isnan(f) and f in _SENTINEL_VALUES:
+                f = np.nan
+            cleaned[k] = f
         except (TypeError, ValueError):
-            cleaned[k] = 0.0
+            cleaned[k] = np.nan
     return cleaned
 
 
@@ -119,8 +169,10 @@ def build_data_list(
     for pid in ids:
         pdata      = config.get(pid, {})
         clin_dict  = pdata.get("pre_op_features", {})
-        clin = np.nan_to_num(
-            np.array([clin_dict.get(k, 0.0) for k in feature_keys], dtype=np.float32)
+        # Preserve NaN for missing / sentinel values — NormalizeClinicald imputes
+        # them to z=0 (training mean) after normalisation, not before.
+        clin = np.array(
+            [clin_dict.get(k, np.nan) for k in feature_keys], dtype=np.float32
         )
 
         pre_op      = (pdata.get("scans", {}).get("pre_op")) or {}
@@ -193,7 +245,11 @@ class NormalizeClinicald(MapTransform):
 
     def __call__(self, data: dict) -> dict:
         clin = torch.as_tensor(data["clin"]).float()
-        data["clin"] = (clin - self.mean) / (self.std + self.eps)
+        normalised = (clin - self.mean) / (self.std + self.eps)
+        # NaN (missing or sentinel-replaced values) → 0.0 = training mean in z-space.
+        # This is the most agnostic imputation: the feature contributes no signal
+        # for this patient, so the gate can safely zero it out.
+        data["clin"] = torch.nan_to_num(normalised, nan=0.0)
         return data
 
 
@@ -228,16 +284,61 @@ def _tensor_keys(with_complications: bool) -> list[str]:
     return keys
 
 
+_CT  = ["ct"]
+_IMG = ["ct", "lbl", "dst"]
+
+
 def get_train_runtime_transforms(
     clin_mean: np.ndarray,
     clin_std: np.ndarray,
     complications: list[str] | None = None,
 ) -> Compose:
-    """Per-iteration augmentation + CTA build + normalisation."""
+    """Per-iteration augmentation + CTA build + normalisation.
+
+    Spatial augmentations operate on ct+lbl+dst together (before BuildCTAd)
+    so all three volumes stay geometrically consistent.  Intensity augmentations
+    operate on ct only — lbl is a label map and dst is a distance field; neither
+    should be blurred, shifted, or contrast-scaled.
+
+    Note: aaa_metrics scalars are pre-computed from the original scan and are
+    NOT recomputed here, so small spatial perturbations (zoom, affine) introduce
+    a minor image/scalar inconsistency.  This is accepted: the scalars are the
+    clinically authoritative values; the model learns robustness from the mismatch.
+    """
     return Compose([
-        RandGaussianNoised(keys=["ct"], prob=0.3, mean=0.0, std=0.02),
-        RandBiasFieldd(keys=["ct"], prob=0.2),
-        RandScaleIntensityd(keys=["ct"], factors=0.1, prob=0.5),
+        # ── spatial (must precede BuildCTAd) ─────────────────────────────────
+        RandFlipd(keys=_IMG, spatial_axis=0, prob=0.5),
+        RandFlipd(keys=_IMG, spatial_axis=1, prob=0.5),
+        RandFlipd(keys=_IMG, spatial_axis=2, prob=0.4),
+        # 90° axial rotations — aggressive for aortic anatomy; monitor val AUC
+        RandRotate90d(keys=_IMG, prob=0.5, max_k=3, spatial_axes=(0, 1)),
+        RandAffined(
+            keys=_IMG,
+            prob=0.3,
+            rotate_range=(0.175, 0.175, 0.175),
+            translate_range=(10, 10, 5),
+            mode=("bilinear", "nearest", "bilinear"),
+            padding_mode="border",
+        ),
+        RandZoomd(
+            keys=_IMG,
+            min_zoom=0.85, max_zoom=1.15,
+            prob=0.3,
+            mode=("trilinear", "nearest", "trilinear"),
+            keep_size=True,
+            padding_mode="edge",
+        ),
+        # ── intensity (ct only) ───────────────────────────────────────────────
+        RandAdjustContrastd(keys=_CT, gamma=(0.7, 1.3), prob=0.3),
+        RandShiftIntensityd(keys=_CT, offsets=0.1, prob=0.3),
+        RandScaleIntensityd(keys=_CT, factors=0.15, prob=0.5),
+        RandBiasFieldd(keys=_CT, prob=0.2, coeff_range=(0.0, 0.3)),
+        RandGaussianNoised(keys=_CT, prob=0.3, mean=0.0, std=0.05),
+        RandGaussianSmoothd(
+            keys=_CT, prob=0.2,
+            sigma_x=(0.5, 1.0), sigma_y=(0.5, 1.0), sigma_z=(0.25, 0.5),
+        ),
+        # ── build 4-channel CTA tensor ────────────────────────────────────────
         BuildCTAd(),
         ToTensord(keys=_tensor_keys(bool(complications))),
         NormalizeClinicald(keys=["clin"], mean=clin_mean, std=clin_std),
@@ -362,11 +463,18 @@ def build_loaders(
 
     sampler = _make_weighted_sampler(train_files, seed=seed)
 
-    loader_kwargs = dict(num_workers=num_workers, pin_memory=True,
-                         persistent_workers=True, prefetch_factor=2,
-                         worker_init_fn=_worker_init)
+    # Val is 100%-cached so it needs far fewer workers; fewer workers also reduces
+    # the persistent-worker RSS accumulation that causes OOM on long runs.
+    val_num_workers = max(2, num_workers // 4)
+
+    train_kwargs = dict(num_workers=num_workers, pin_memory=True,
+                        persistent_workers=True, prefetch_factor=1,
+                        worker_init_fn=_worker_init)
+    val_kwargs   = dict(num_workers=val_num_workers, pin_memory=True,
+                        persistent_workers=True, prefetch_factor=1,
+                        worker_init_fn=_worker_init)
     # shuffle=True is mutually exclusive with sampler; sampler handles ordering.
     train_loader = DataLoader(train_ds, batch_size=batch_size,
-                              sampler=sampler, **loader_kwargs)
-    val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False, **loader_kwargs)
+                              sampler=sampler, **train_kwargs)
+    val_loader   = DataLoader(val_ds,   batch_size=batch_size, shuffle=False, **val_kwargs)
     return train_loader, val_loader

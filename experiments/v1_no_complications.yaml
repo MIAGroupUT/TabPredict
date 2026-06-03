@@ -22,19 +22,19 @@ model:
   with_complications: false
   complications: []
   aaa_dim: 5
-  clinical_backbone: tabm        # mlp | tabm
+  clinical_backbone: mlp        # mlp | tabm
   tabm:                         # only used when clinical_backbone: tabm
     k: 16                       # ensemble members (paper default 32; 16 for small data)
     n_blocks: 2
-    d_block: 128
+    d_block: 64                 # was 128; halved to ~4k params/positive (was 10k — too many for 63 positives)
     dropout: 0.3
     num_embeddings: periodic    # periodic | none  (PeriodicEmbeddings lite=True)
-    d_embedding: 16             # embedding dim per feature
+    d_embedding: 8              # was 16; halved to match reduced d_block
 
 training:
   seed: 3299
   batch_size: 8
-  num_workers: 8
+  num_workers: 4
   image_size: [224, 224, 160]
   voxel_spacing: [1.5, 1.5, 3]
   hu_range: [-1000, 1000]
@@ -51,7 +51,7 @@ training:
 
   # Causal modality dropout — applied in BOTH Stage A and Stage B
   modality_dropout:
-    p_cta: 0.0               # CTA confirmed useful by ablation; never drop it
+    p_cta: 0.0               # CTA  useful by ablation
     p_aaa_given_cta: 0.15
     p_aaa_given_clin: 0.15
     p_clinical: 0.15         # 0.30 too aggressive; 63 train positives is still small
@@ -73,9 +73,9 @@ training:
 
 paths:
   base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_no_complications_TabM_02062026
+  checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_no_complications_MLP_03062026
 
 wandb:
   project: AAA-Reintervention-Risk
-  run_name: v1_no_complications_tabm
+  run_name: v1_no_complications_mlp
   mode: online

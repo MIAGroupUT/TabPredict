@@ -9,7 +9,34 @@ Entries are grouped by push milestone (no formal version tags yet).
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Added
+
+- **Expanded training augmentation pipeline** in `get_train_runtime_transforms` (`src/data/loaders.py`) — 12 transforms total, up from 3. Augmentation now fires on ≈98% of samples, effectively presenting a unique view of every training case each epoch.
+  - **Spatial transforms** (applied jointly to `ct`, `lbl`, and `dst` before `BuildCTAd`, so all three volumes remain geometrically consistent): `RandFlipd` on axes 0/1/2 (p=0.5/0.5/0.4), `RandRotate90d` in the axial plane (p=0.5, max_k=3), `RandAffined` (±10° rotation all axes, ±10/10/5-voxel translation, p=0.3), `RandZoomd` (85–115% scale, `keep_size=True`, p=0.3). Applying spatial transforms to all three volumes together prevents the lumen mask and distance map from falling out of alignment with the CT.
+  - **Intensity transforms** (applied to `ct` only — `lbl` is a label map and `dst` a distance field, neither should be blurred or shifted): `RandAdjustContrastd` (γ=0.7–1.3, p=0.3; simulates scanner-to-scanner contrast variation), `RandShiftIntensityd` (±0.1 additive, p=0.3; HU calibration offset), `RandScaleIntensityd` (±15%, p=0.5; multiplicative scaling), `RandBiasFieldd` (coeff 0–0.3, p=0.2), `RandGaussianNoised` (σ=0.05, p=0.3), `RandGaussianSmoothd` (σ_z=0.25–0.5, half of σ_x/y, reflecting the 3 mm axial slice spacing, p=0.2).
+  - Note: spatial augmentations (zoom, affine) do not recompute the pre-stored `aaa_metrics` scalars — those remain the clinically authoritative values, and the model learns robustness from the minor image/scalar mismatch.
+- **35 new tests** in `tests/test_loaders.py` (total test count 274 → 312):
+  - **Augmentation pipeline (20 tests):** composition (all 10 augment classes present, 3 flips, val has none), key coverage (spatial ops on `lbl`+`dst`, intensity ops on `ct` only), ordering (all augments precede `BuildCTAd`), flip correctness (each axis reverses the right spatial dim; `ct` and `lbl` flipped identically; values preserved), intensity isolation (6 transforms each leave `lbl`+`dst` bit-identical), shape preservation (zoom/affine keep `(D,H,W)`; zoom nearest-neighbour keeps `lbl` in `{0,1,2}`), stochasticity (two passes on the same input differ).
+  - **Sentinel and missing-value handling (15 tests):** 9999/999/99999 and their string forms become NaN; 9998 passes through; date strings become NaN; `PatientNr` absent from cleaned dict and from `feature_names`; `compute_clin_stats` excludes NaN from mean/std; all-NaN features get neutral stats (mean=0, std≈1); `NormalizeClinicald` imputes NaN to z=0 after normalising; sentinel patients get z=0 for sentinel feature; no NaN survives into model; `build_data_list` preserves NaN for downstream imputation.
+
+### Fixed
+
+- **DataLoader CPU RAM OOM** causing SLURM jobs to be killed around epoch 18 on 180 GB nodes (`srun: error: task 0: Killed`). Two compounding causes: (1) with `v1_with_complications`, 16 train + 16 val = 32 persistent workers each holding `prefetch_factor=2` batches of 128 MB 4-channel CTA tensors ≈ 64 GB in worker buffers alone; (2) Python copy-on-write degradation — forked worker processes accumulate RSS epoch-by-epoch as CPython reference-counting touches shared `CacheDataset` pages, causing each worker's resident set to grow toward the full cache size. Fix applied in `src/data/loaders.py`:
+  - **`prefetch_factor` 2 → 1** for both train and val loaders — halves per-worker buffer RAM immediately.
+  - **Val loader now uses `max(2, num_workers // 4)` workers** — val is 100%-cached and runs once per epoch; it does not need a large worker pool.
+  - **`num_workers` reduced** in experiment configs: `v1_no_complications` 8 → 4; `v1_with_complications` 16 → 6. Peak worker-buffer RAM drops from ~64 GB to ~10 GB.
+- **Clinical branch near-zero modality importance** (0–1% across test patients) caused by RADAR sentinel values (999, 9999, 99999) being treated as real clinical measurements. Root cause: 155 of 241 features are >80% missing and use these sentinels for "not measured"; including them in `compute_clin_stats` inflated the mean to ~8000 for affected features (e.g. `Bl_Bl_PH_FEV` with 80% 9999s: mean ≈ 8100 instead of ≈ 80). After z-normalisation, real patient values became z ≈ −30 to −50 (extreme outliers) while sentinel patients got z ≈ 0 (looked normal). The L1 feature gate correctly learned to zero out all contaminated features — but that meant zeroing almost everything. Fixed in `_clean_clinical_features`, `compute_clin_stats`, `build_data_list`, and `NormalizeClinicald`:
+  - **`_SENTINEL_VALUES = frozenset({999.0, 9999.0, 99999.0})`** and **`_EXCLUDE_FEATURES = frozenset({"PatientNr"})`** — named constants, single source of truth.
+  - **`_clean_clinical_features`**: sentinel values → `np.nan`; non-numeric strings (date fields like `"2010-12-07"`) → `np.nan` (previously silently became `0.0`); `None`/empty → `np.nan`; `PatientNr` (database ID up to ~1e8, no clinical meaning) excluded entirely.
+  - **`compute_clin_stats`**: `matrix.mean()` / `matrix.std()` → `np.nanmean()` / `np.nanstd()` so sentinels that became NaN are excluded. Features that are 100% missing get `mean=0, std=1` (neutral: normalise to z=0 for every patient, gate zeros them cheaply).
+  - **`build_data_list`**: `nan_to_num` removed from `clin` array — NaN propagates to `NormalizeClinicald` so imputation happens in z-space, not raw space.
+  - **`NormalizeClinicald.__call__`**: `torch.nan_to_num(normalised, nan=0.0)` after normalising — missing/sentinel patients get z=0 (training mean), the most agnostic imputation.
+
+### Changed
+
+- **TabM `d_block` 128 → 64; `d_embedding` 16 → 8** in both experiment YAMLs. At `d_block=128` the TabM clinical branch had 671K parameters = 10,646 per training positive — severely over-parameterised for a 63-positive dataset. Reducing to `d_block=64` and `d_embedding=8` brings this to ~282K = ~4,474 per positive, a more reasonable ratio while retaining the ensemble benefit of `k=16` members.
+- **`v1_with_complications.yaml`**: `clinical_backbone` set to `tabm` and `checkpoint_dir` updated to `v1_with_complications_TabM_03062026` for the next TabM training run with the corrected sentinel handling and reduced `d_block`.
+- **`v1_no_complications.yaml`**: `clinical_backbone` remains `mlp`; `checkpoint_dir` updated to `v1_no_complications_MLP_03062026`.
 
 ---
 

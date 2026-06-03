@@ -44,7 +44,7 @@ python scripts/test.py \
     --checkpoint /home/ranema/AI4EVAR/checkpoints/v1_no_complications/best_stage_b.pt \
     --output_dir /home/ranema/AI4EVAR/test_results/v1_no_complications
 
-# Run tests (CPU-only, ~20 s)
+# Run tests (312 tests, CPU-only, ~18 s)
 ~/.conda/envs/ai4evar/bin/python -m pytest tests/ -v
 ```
 

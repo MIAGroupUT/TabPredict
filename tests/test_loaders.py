@@ -36,22 +36,22 @@ def test_clean_string_numeric():
     assert cleaned["a"] == pytest.approx(3.14)
 
 
-def test_clean_none_becomes_zero():
+def test_clean_none_becomes_nan():
     from src.data.loaders import _clean_clinical_features
     cleaned = _clean_clinical_features({"a": None})
-    assert cleaned["a"] == 0.0
+    assert np.isnan(cleaned["a"])
 
 
-def test_clean_empty_string_becomes_zero():
+def test_clean_empty_string_becomes_nan():
     from src.data.loaders import _clean_clinical_features
     cleaned = _clean_clinical_features({"a": ""})
-    assert cleaned["a"] == 0.0
+    assert np.isnan(cleaned["a"])
 
 
-def test_clean_invalid_string_becomes_zero():
+def test_clean_invalid_string_becomes_nan():
     from src.data.loaders import _clean_clinical_features
     cleaned = _clean_clinical_features({"a": "not_a_number"})
-    assert cleaned["a"] == 0.0
+    assert np.isnan(cleaned["a"])
 
 
 def test_clean_float_passthrough():
@@ -65,6 +65,75 @@ def test_clean_preserves_all_keys():
     d = {"x": 1, "y": None, "z": ""}
     cleaned = _clean_clinical_features(d)
     assert set(cleaned.keys()) == {"x", "y", "z"}
+
+
+# ── sentinel and exclusion handling ──────────────────────────────────────────
+
+
+def test_clean_sentinel_9999_becomes_nan():
+    from src.data.loaders import _clean_clinical_features
+    cleaned = _clean_clinical_features({"a": 9999.0})
+    assert np.isnan(cleaned["a"]), "9999 sentinel must become NaN"
+
+
+def test_clean_sentinel_999_becomes_nan():
+    from src.data.loaders import _clean_clinical_features
+    cleaned = _clean_clinical_features({"a": 999.0})
+    assert np.isnan(cleaned["a"]), "999 sentinel must become NaN"
+
+
+def test_clean_sentinel_99999_becomes_nan():
+    from src.data.loaders import _clean_clinical_features
+    cleaned = _clean_clinical_features({"a": 99999.0})
+    assert np.isnan(cleaned["a"]), "99999 sentinel must become NaN"
+
+
+def test_clean_sentinel_as_string_becomes_nan():
+    """Sentinels may arrive as string '9999' from JSON."""
+    from src.data.loaders import _clean_clinical_features
+    cleaned = _clean_clinical_features({"a": "9999"})
+    assert np.isnan(cleaned["a"])
+
+
+def test_clean_near_sentinel_is_not_sentinel():
+    """9998 is a real measurement value, not a sentinel."""
+    from src.data.loaders import _clean_clinical_features
+    cleaned = _clean_clinical_features({"a": 9998.0})
+    assert cleaned["a"] == pytest.approx(9998.0)
+
+
+def test_clean_date_string_becomes_nan():
+    """Date fields like '2010-12-07' cannot be cast to float → NaN."""
+    from src.data.loaders import _clean_clinical_features
+    cleaned = _clean_clinical_features({"a": "2010-12-07"})
+    assert np.isnan(cleaned["a"])
+
+
+def test_clean_excludes_patient_nr():
+    """PatientNr (a database ID) must be dropped entirely."""
+    from src.data.loaders import _clean_clinical_features
+    cleaned = _clean_clinical_features({"PatientNr": "12345", "age": 72.0})
+    assert "PatientNr" not in cleaned
+    assert cleaned["age"] == pytest.approx(72.0)
+
+
+def test_feature_names_excludes_patient_nr(tmp_path):
+    """load_splits_and_config must not include PatientNr in feature_names."""
+    from src.data.loaders import load_splits_and_config
+    config = {
+        "p1": {
+            "pre_op_features": {"PatientNr": "99", "age": 70.0, "bmi": 25.0},
+            "ground_truth": {"reintervention": 0},
+        }
+    }
+    splits = {"train": ["p1"], "val": [], "test": []}
+    clin_dir = tmp_path / "clinical_data"
+    clin_dir.mkdir()
+    (tmp_path / "dataset_splits.json").write_text(json.dumps(splits))
+    (clin_dir / "radar_multimodal_config_v1.json").write_text(json.dumps(config))
+    _, _, feature_names = load_splits_and_config(tmp_path)
+    assert "PatientNr" not in feature_names
+    assert "age" in feature_names
 
 
 # ── _load_aaa_metrics ─────────────────────────────────────────────────────────
@@ -152,7 +221,7 @@ def test_load_splits_feature_count(tmp_path):
 
 
 def test_load_splits_cleans_none_features(tmp_path):
-    """None values in pre_op_features should become 0.0."""
+    """None values and invalid strings in pre_op_features should become NaN."""
     from src.data.loaders import load_splits_and_config
     config = {
         "p1": {
@@ -167,8 +236,8 @@ def test_load_splits_cleans_none_features(tmp_path):
     (clin_dir / "radar_multimodal_config_v1.json").write_text(json.dumps(config))
 
     _, result_config, _ = load_splits_and_config(tmp_path)
-    assert result_config["p1"]["pre_op_features"]["a"] == 0.0
-    assert result_config["p1"]["pre_op_features"]["b"] == 0.0
+    assert np.isnan(result_config["p1"]["pre_op_features"]["a"])
+    assert np.isnan(result_config["p1"]["pre_op_features"]["b"])
 
 
 # ── compute_clin_stats ────────────────────────────────────────────────────────
@@ -194,6 +263,33 @@ def test_compute_clin_stats_std_positive():
     assert std[0] > 0  # +1e-8 floor
 
 
+def test_compute_clin_stats_sentinel_excluded_from_mean():
+    """Sentinel values (already converted to NaN by _clean_clinical_features)
+    must not influence the mean — only real observations count."""
+    from src.data.loaders import compute_clin_stats
+    # p1 has sentinel → NaN; p2 and p3 have real values 2.0 and 4.0
+    config = {
+        "p1": {"pre_op_features": {"a": np.nan}},
+        "p2": {"pre_op_features": {"a": 2.0}},
+        "p3": {"pre_op_features": {"a": 4.0}},
+    }
+    mean, std = compute_clin_stats(["p1", "p2", "p3"], config, ["a"])
+    assert mean[0] == pytest.approx(3.0)   # nanmean([NaN, 2, 4]) = 3.0
+    assert std[0]  >  0
+
+
+def test_compute_clin_stats_all_nan_feature_gets_neutral_stats():
+    """A 100%-missing feature must receive mean=0, std≈1 so it normalises to 0."""
+    from src.data.loaders import compute_clin_stats
+    config = {
+        "p1": {"pre_op_features": {"a": np.nan}},
+        "p2": {"pre_op_features": {"a": np.nan}},
+    }
+    mean, std = compute_clin_stats(["p1", "p2"], config, ["a"])
+    assert mean[0] == pytest.approx(0.0)
+    assert std[0]  == pytest.approx(1.0 + 1e-8)
+
+
 def test_compute_clin_stats_constant_feature():
     """Constant feature: std = 1e-8 (just the epsilon)."""
     from src.data.loaders import compute_clin_stats
@@ -206,14 +302,15 @@ def test_compute_clin_stats_constant_feature():
     assert std[0]  == pytest.approx(1e-8)
 
 
-def test_compute_clin_stats_missing_key_defaults_zero():
+def test_compute_clin_stats_missing_key_excluded_from_mean():
+    """A missing key → NaN → excluded from mean (not treated as 0)."""
     from src.data.loaders import compute_clin_stats
     config = {
-        "p1": {"pre_op_features": {}},  # missing "a"
-        "p2": {"pre_op_features": {"a": 4.0}},
+        "p1": {"pre_op_features": {}},          # missing "a" → NaN
+        "p2": {"pre_op_features": {"a": 4.0}},  # only real observation
     }
     mean, _ = compute_clin_stats(["p1", "p2"], config, ["a"])
-    assert mean[0] == pytest.approx(2.0)  # (0 + 4) / 2
+    assert mean[0] == pytest.approx(4.0)  # nanmean([NaN, 4.0]) = 4.0
 
 
 # ── build_data_list ───────────────────────────────────────────────────────────
@@ -372,6 +469,68 @@ def test_normalize_clinicald_zero_std_safe():
     t    = NormalizeClinicald(keys=["clin"], mean=mean, std=std)
     out  = t({"clin": np.array([5.0], dtype=np.float32)})
     assert torch.isfinite(out["clin"]).all()
+
+
+def test_normalize_clinicald_nan_imputed_to_zero():
+    """NaN in the raw clin vector (missing / sentinel) must become 0.0 after
+    normalisation — i.e. z = 0 = the training mean, the neutral imputation."""
+    from src.data.loaders import NormalizeClinicald
+    mean = np.array([10.0, 2.0], dtype=np.float32)
+    std  = np.array([ 5.0, 1.0], dtype=np.float32)
+    t    = NormalizeClinicald(keys=["clin"], mean=mean, std=std)
+    out  = t({"clin": np.array([np.nan, 4.0], dtype=np.float32)})
+    assert out["clin"][0].item() == pytest.approx(0.0)   # NaN → z=0
+    assert out["clin"][1].item() == pytest.approx(2.0)   # (4-2)/1 = 2
+
+
+def test_normalize_clinicald_sentinel_patient_gets_z_zero():
+    """End-to-end: a patient whose feature is a sentinel (9999 → NaN after
+    _clean_clinical_features) must get z=0 for that feature after normalisation,
+    regardless of the true feature mean and std."""
+    from src.data.loaders import NormalizeClinicald
+    # Suppose feature "FEV" has mean=80, std=20 on real observations.
+    # A patient with sentinel 9999 should be imputed to z=0 (= mean).
+    mean = np.array([80.0], dtype=np.float32)
+    std  = np.array([20.0], dtype=np.float32)
+    t    = NormalizeClinicald(keys=["clin"], mean=mean, std=std)
+    # NaN represents the sentinel that _clean_clinical_features already converted
+    out  = t({"clin": np.array([np.nan], dtype=np.float32)})
+    assert out["clin"][0].item() == pytest.approx(0.0)
+
+
+def test_normalize_clinicald_output_is_finite_with_nan_input():
+    """No NaN must survive into the model — output must be fully finite."""
+    from src.data.loaders import NormalizeClinicald
+    mean = np.zeros(5, dtype=np.float32)
+    std  = np.ones(5,  dtype=np.float32)
+    t    = NormalizeClinicald(keys=["clin"], mean=mean, std=std)
+    clin = np.array([1.0, np.nan, 3.0, np.nan, 5.0], dtype=np.float32)
+    out  = t({"clin": clin})
+    assert torch.isfinite(out["clin"]).all()
+
+
+def test_build_data_list_preserves_nan_for_missing_feature(tmp_path):
+    """build_data_list must NOT call nan_to_num on clin — NaN must reach
+    NormalizeClinicald so imputation happens in z-space, not raw space."""
+    from src.data.loaders import build_data_list
+    config = {"p1": {"pre_op_features": {"a": np.nan, "b": 3.0},
+                     "ground_truth": {"reintervention": 0}}}
+    result = build_data_list(["p1"], tmp_path, config, ["a", "b"])
+    clin = result[0]["clin"]
+    assert np.isnan(clin[0]), "NaN feature must propagate to clin array"
+    assert clin[1] == pytest.approx(3.0)
+
+
+def test_build_data_list_sentinel_in_raw_config_reaches_array_as_nan(tmp_path):
+    """A sentinel value already converted by _clean_clinical_features (→ NaN)
+    must appear as NaN in the built clin array — not as 9999 or 0."""
+    from src.data.loaders import build_data_list
+    # Simulate post-cleaning config (as returned by load_splits_and_config)
+    config = {"p1": {"pre_op_features": {"fev": np.nan, "age": 65.0},
+                     "ground_truth": {"reintervention": 0}}}
+    result = build_data_list(["p1"], tmp_path, config, ["fev", "age"])
+    assert np.isnan(result[0]["clin"][0])
+    assert result[0]["clin"][1] == pytest.approx(65.0)
 
 
 # ── RuntimeDataset ────────────────────────────────────────────────────────────
@@ -596,3 +755,310 @@ def test_build_loaders_batch_size_forwarded(mock_cache, mock_dl, tmp_path):
     )
     assert mock_dl.call_args_list[0].kwargs["batch_size"] == 4
     assert mock_dl.call_args_list[1].kwargs["batch_size"] == 4
+
+
+# ── augmentation pipeline tests ───────────────────────────────────────────────
+#
+# These tests verify the training augmentation pipeline defined in
+# get_train_runtime_transforms is correctly assembled and behaves as expected:
+#   1. Pipeline composition  — all augment classes present, correct count
+#   2. Key coverage          — spatial ops touch ct+lbl+dst; intensity ops touch ct only
+#   3. Ordering              — spatial augments precede BuildCTAd
+#   4. Flip correctness      — each axis flips the right spatial dimension
+#   5. Intensity isolation   — intensity transforms do not alter lbl or dst
+#   6. Shape preservation    — zoom and affine keep_size returns original shape
+#   7. Stochasticity         — two forward passes on the same volume differ
+
+from monai.transforms import (
+    RandAdjustContrastd,
+    RandAffined,
+    RandBiasFieldd,
+    RandFlipd,
+    RandGaussianNoised,
+    RandGaussianSmoothd,
+    RandRotate90d,
+    RandScaleIntensityd,
+    RandShiftIntensityd,
+    RandZoomd,
+)
+
+_SPATIAL_TYPES   = (RandFlipd, RandRotate90d, RandAffined, RandZoomd)
+_INTENSITY_TYPES = (
+    RandAdjustContrastd, RandShiftIntensityd, RandScaleIntensityd,
+    RandBiasFieldd, RandGaussianNoised, RandGaussianSmoothd,
+)
+
+
+def _aug_vol(size=(8, 8, 8)):
+    """Minimal {ct, lbl, dst} dict for augmentation tests (no NIfTI I/O needed)."""
+    return {
+        "ct":  torch.rand(1, *size),
+        "lbl": torch.randint(0, 3, (1, *size)).float(),
+        "dst": torch.rand(1, *size),
+    }
+
+
+def _train_aug_tfm():
+    from src.data.loaders import get_train_runtime_transforms
+    return get_train_runtime_transforms(
+        np.zeros(CLINICAL_DIM, dtype=np.float32),
+        np.ones(CLINICAL_DIM, dtype=np.float32),
+    )
+
+
+def _val_aug_tfm():
+    from src.data.loaders import get_val_runtime_transforms
+    return get_val_runtime_transforms(
+        np.zeros(CLINICAL_DIM, dtype=np.float32),
+        np.ones(CLINICAL_DIM, dtype=np.float32),
+    )
+
+
+# ── 1. Pipeline composition ───────────────────────────────────────────────────
+
+def test_train_pipeline_has_all_spatial_transform_types():
+    """All four spatial augment classes must appear in the training Compose."""
+    types = {type(t) for t in _train_aug_tfm().transforms}
+    for cls in _SPATIAL_TYPES:
+        assert cls in types, f"{cls.__name__} missing from training pipeline"
+
+
+def test_train_pipeline_has_all_intensity_transform_types():
+    """All six intensity augment classes must appear in the training Compose."""
+    types = {type(t) for t in _train_aug_tfm().transforms}
+    for cls in _INTENSITY_TYPES:
+        assert cls in types, f"{cls.__name__} missing from training pipeline"
+
+
+def test_train_pipeline_has_exactly_three_flip_transforms():
+    """Exactly three RandFlipd instances must be present (axes 0, 1, 2)."""
+    flips = [t for t in _train_aug_tfm().transforms if isinstance(t, RandFlipd)]
+    assert len(flips) == 3
+
+
+def test_val_pipeline_has_no_rand_augmentations():
+    """Val Compose must contain no Rand* augmentation transforms."""
+    rand_types = _SPATIAL_TYPES + _INTENSITY_TYPES
+    for t in _val_aug_tfm().transforms:
+        assert not isinstance(t, rand_types), (
+            f"Val pipeline must not contain {type(t).__name__}"
+        )
+
+
+# ── 2. Key coverage ───────────────────────────────────────────────────────────
+
+def test_spatial_transforms_include_lbl_and_dst():
+    """Every spatial augment must operate on lbl and dst (not ct alone)."""
+    for t in _train_aug_tfm().transforms:
+        if isinstance(t, _SPATIAL_TYPES):
+            assert "lbl" in t.keys, f"{type(t).__name__} missing 'lbl' key"
+            assert "dst" in t.keys, f"{type(t).__name__} missing 'dst' key"
+
+
+def test_intensity_transforms_are_ct_only():
+    """Every intensity augment must operate on ct only — never on lbl or dst."""
+    for t in _train_aug_tfm().transforms:
+        if isinstance(t, _INTENSITY_TYPES):
+            assert list(t.keys) == ["ct"], (
+                f"{type(t).__name__} keys {list(t.keys)} must be ['ct'] only"
+            )
+
+
+# ── 3. Ordering ───────────────────────────────────────────────────────────────
+
+def test_spatial_augments_precede_build_ctad():
+    """All spatial augments must appear before BuildCTAd in the pipeline."""
+    from src.data.loaders import BuildCTAd
+    transforms = _train_aug_tfm().transforms
+    build_idx = next(i for i, t in enumerate(transforms) if isinstance(t, BuildCTAd))
+    for i, t in enumerate(transforms):
+        if isinstance(t, _SPATIAL_TYPES):
+            assert i < build_idx, (
+                f"{type(t).__name__} at index {i} appears after BuildCTAd at {build_idx}"
+            )
+
+
+def test_intensity_augments_precede_build_ctad():
+    """All intensity augments must also appear before BuildCTAd."""
+    from src.data.loaders import BuildCTAd
+    transforms = _train_aug_tfm().transforms
+    build_idx = next(i for i, t in enumerate(transforms) if isinstance(t, BuildCTAd))
+    for i, t in enumerate(transforms):
+        if isinstance(t, _INTENSITY_TYPES):
+            assert i < build_idx, (
+                f"{type(t).__name__} at index {i} appears after BuildCTAd at {build_idx}"
+            )
+
+
+# ── 4. Flip correctness ───────────────────────────────────────────────────────
+
+def _asymmetric_vol(size=(4, 6, 8)):
+    """Volume whose spatial dims are all different to make axis errors obvious."""
+    ct  = torch.arange(1 * size[0] * size[1] * size[2]).float().reshape(1, *size)
+    lbl = ct.clone()
+    dst = ct.clone()
+    return {"ct": ct, "lbl": lbl, "dst": dst}
+
+
+def test_flip_axis0_reverses_first_spatial_dim():
+    """RandFlipd(spatial_axis=0, prob=1.0) must reverse tensor dimension 1."""
+    data = _asymmetric_vol()
+    t = RandFlipd(keys=["ct", "lbl", "dst"], spatial_axis=0, prob=1.0)
+    out = t(data)
+    expected = data["ct"].flip(1)
+    assert torch.allclose(out["ct"], expected)
+
+
+def test_flip_axis1_reverses_second_spatial_dim():
+    """RandFlipd(spatial_axis=1, prob=1.0) must reverse tensor dimension 2."""
+    data = _asymmetric_vol()
+    t = RandFlipd(keys=["ct", "lbl", "dst"], spatial_axis=1, prob=1.0)
+    out = t(data)
+    expected = data["ct"].flip(2)
+    assert torch.allclose(out["ct"], expected)
+
+
+def test_flip_axis2_reverses_third_spatial_dim():
+    """RandFlipd(spatial_axis=2, prob=1.0) must reverse tensor dimension 3."""
+    data = _asymmetric_vol()
+    t = RandFlipd(keys=["ct", "lbl", "dst"], spatial_axis=2, prob=1.0)
+    out = t(data)
+    expected = data["ct"].flip(3)
+    assert torch.allclose(out["ct"], expected)
+
+
+def test_flip_applied_consistently_to_ct_and_lbl():
+    """When ct and lbl start identical, a flip must leave them identical afterwards."""
+    ct  = torch.rand(1, 6, 6, 6)
+    data = {"ct": ct.clone(), "lbl": ct.clone(), "dst": torch.zeros(1, 6, 6, 6)}
+    t = RandFlipd(keys=["ct", "lbl", "dst"], spatial_axis=0, prob=1.0)
+    out = t(data)
+    assert torch.allclose(out["ct"], out["lbl"])
+
+
+def test_flip_lbl_values_are_preserved_after_flip():
+    """Flip must permute voxels, not alter label values (no interpolation on lbl)."""
+    lbl = torch.randint(0, 3, (1, 8, 8, 8)).float()
+    data = {"ct": torch.rand(1, 8, 8, 8), "lbl": lbl.clone(), "dst": torch.rand(1, 8, 8, 8)}
+    t = RandFlipd(keys=["ct", "lbl", "dst"], spatial_axis=0, prob=1.0)
+    out = t(data)
+    # Flatten + convert MetaTensor → plain tensor before sorting to avoid type mismatch
+    out_sorted  = torch.as_tensor(out["lbl"]).float().flatten().sort().values
+    orig_sorted = lbl.flatten().sort().values
+    assert torch.allclose(out_sorted, orig_sorted), "Flip changed label values (not just order)"
+
+
+# ── 5. Intensity isolation ────────────────────────────────────────────────────
+
+def _intensity_iso(cls, **kwargs):
+    """Apply a ct-only intensity augment (prob=1.0) and check lbl+dst are unchanged."""
+    data     = _aug_vol(size=(8, 8, 8))
+    lbl_orig = data["lbl"].clone()
+    dst_orig = data["dst"].clone()
+    t = cls(keys=["ct"], prob=1.0, **kwargs)
+    out = t(data)
+    assert torch.allclose(out["lbl"], lbl_orig), f"{cls.__name__} modified lbl"
+    assert torch.allclose(out["dst"], dst_orig), f"{cls.__name__} modified dst"
+
+
+def test_gaussian_noise_does_not_modify_lbl_or_dst():
+    _intensity_iso(RandGaussianNoised, mean=0.0, std=0.5)
+
+
+def test_scale_intensity_does_not_modify_lbl_or_dst():
+    _intensity_iso(RandScaleIntensityd, factors=0.5)
+
+
+def test_shift_intensity_does_not_modify_lbl_or_dst():
+    _intensity_iso(RandShiftIntensityd, offsets=0.3)
+
+
+def test_adjust_contrast_does_not_modify_lbl_or_dst():
+    _intensity_iso(RandAdjustContrastd, gamma=(2.0, 2.0))
+
+
+def test_bias_field_does_not_modify_lbl_or_dst():
+    _intensity_iso(RandBiasFieldd, coeff_range=(0.1, 0.3))
+
+
+def test_gaussian_smooth_does_not_modify_lbl_or_dst():
+    _intensity_iso(
+        RandGaussianSmoothd,
+        sigma_x=(0.5, 1.0), sigma_y=(0.5, 1.0), sigma_z=(0.25, 0.5),
+    )
+
+
+# ── 6. Shape preservation ─────────────────────────────────────────────────────
+
+def test_zoom_keep_size_preserves_spatial_shape():
+    """RandZoomd with keep_size=True must output the same spatial shape as input."""
+    size = (16, 16, 16)
+    data = _aug_vol(size=size)
+    t = RandZoomd(
+        keys=["ct", "lbl", "dst"],
+        min_zoom=0.85, max_zoom=1.15, prob=1.0,
+        mode=("trilinear", "nearest", "trilinear"),
+        keep_size=True, padding_mode="edge",
+    )
+    out = t(data)
+    for key in ("ct", "lbl", "dst"):
+        assert out[key].shape[1:] == size, (
+            f"zoom changed {key} shape: got {out[key].shape[1:]}"
+        )
+
+
+def test_affine_preserves_spatial_shape():
+    """RandAffined must return the same spatial shape as its input."""
+    size = (16, 16, 16)
+    data = _aug_vol(size=size)
+    t = RandAffined(
+        keys=["ct", "lbl", "dst"], prob=1.0,
+        rotate_range=(0.1, 0.1, 0.1),
+        mode=("bilinear", "nearest", "bilinear"),
+        padding_mode="border",
+    )
+    out = t(data)
+    for key in ("ct", "lbl", "dst"):
+        assert out[key].shape[1:] == size, (
+            f"affine changed {key} shape: got {out[key].shape[1:]}"
+        )
+
+
+def test_zoom_lbl_stays_in_valid_range_after_zoom():
+    """After zoom with nearest-neighbour interpolation, lbl values must stay in {0,1,2}."""
+    lbl = torch.randint(0, 3, (1, 16, 16, 16)).float()
+    data = {"ct": torch.rand(1, 16, 16, 16), "lbl": lbl, "dst": torch.rand(1, 16, 16, 16)}
+    t = RandZoomd(
+        keys=["ct", "lbl", "dst"],
+        min_zoom=0.9, max_zoom=1.1, prob=1.0,
+        mode=("trilinear", "nearest", "trilinear"),
+        keep_size=True, padding_mode="edge",
+    )
+    out = t(data)
+    unique_vals = out["lbl"].unique()
+    assert all(v in {0.0, 1.0, 2.0} for v in unique_vals.tolist()), (
+        f"zoom produced unexpected lbl values: {unique_vals.tolist()}"
+    )
+
+
+# ── 7. Stochasticity ──────────────────────────────────────────────────────────
+
+def test_augmentation_pipeline_produces_varied_ct():
+    """Two forward passes through the training pipeline on the same ct must differ."""
+    data1 = _aug_vol(size=(8, 8, 8))
+    # Deep-copy so both calls start from identical input
+    data2 = {k: v.clone() for k, v in data1.items()}
+    # Add required non-image keys so the full Compose can complete
+    clin = np.zeros(CLINICAL_DIM, dtype=np.float32)
+    for d in (data1, data2):
+        d["clin"]                 = clin.copy()
+        d["aaa_metrics"]          = np.zeros(5, dtype=np.float32)
+        d["reintervention_label"] = np.array([0.0], dtype=np.float32)
+
+    tfm = _train_aug_tfm()
+    out1 = tfm(data1)
+    out2 = tfm(data2)
+    # With many augments at various probabilities, identical output is astronomically unlikely
+    assert not torch.allclose(out1["cta"], out2["cta"]), (
+        "Two augmented passes produced identical CTA — augmentation may not be firing"
+    )

@@ -7,7 +7,7 @@ cd /home/ranema/AI4EVAR/ai4evar
 ~/.conda/envs/ai4evar/bin/python -m pytest tests/ -v
 ```
 
-259 tests, CPU-only, no GPU required, no external data files required, ~17 seconds.
+312 tests, CPU-only, no GPU required, no external data files required, ~18 seconds.
 
 ### On SLURM
 
@@ -161,7 +161,7 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 
 ---
 
-### `test_loaders.py` — 44 tests
+### `test_loaders.py` — 88 tests
 
 **Clinical feature cleaning:**
 - Numeric strings → float
@@ -223,6 +223,30 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 - `_make_weighted_sampler`: correct weight assignment (1/N_pos for positives, 1/N_neg for negatives); returns `WeightedRandomSampler`; sampler count equals dataset length
 
 `CacheDataset` and `torch.utils.data.DataLoader` are mocked so no NIfTI files or GPU workers are needed.
+
+**Augmentation pipeline — 20 tests covering 7 properties** (see augmentation section in `data.md`):**
+
+*1. Composition* — all 10 augment classes (`RandFlipd`×3, `RandRotate90d`, `RandAffined`, `RandZoomd`, `RandAdjustContrastd`, `RandShiftIntensityd`, `RandScaleIntensityd`, `RandBiasFieldd`, `RandGaussianNoised`, `RandGaussianSmoothd`) present in training `Compose`; exactly 3 `RandFlipd` instances; val `Compose` contains none.
+
+*2. Key coverage* — every spatial transform (`RandFlipd`, `RandRotate90d`, `RandAffined`, `RandZoomd`) lists `"lbl"` and `"dst"` in its keys; every intensity transform lists `["ct"]` only.
+
+*3. Ordering* — every spatial and intensity transform appears before `BuildCTAd` in the `Compose` index.
+
+*4. Flip correctness* — `RandFlipd(prob=1.0)` on axis 0/1/2 reverses tensor dimension 1/2/3 respectively; `ct` and `lbl` are flipped identically when they start equal; label values are unchanged after flip (permutation only, no interpolation artefacts).
+
+*5. Intensity isolation* — each of the 6 intensity transforms leaves `lbl` and `dst` bit-identical to their inputs.
+
+*6. Shape preservation* — `RandZoomd(keep_size=True)` and `RandAffined` return the same spatial shape `(D, H, W)` as the input; zoom with `mode="nearest"` on `lbl` keeps values in `{0.0, 1.0, 2.0}`.
+
+*7. Stochasticity* — two forward passes through the full training `Compose` on identical inputs produce different `cta` tensors.
+
+**Sentinel and missing-value handling — 15 tests:**
+
+- `_clean_clinical_features`: 9999, 999, 99999 (int, float, and string forms) → NaN; 9998 passes through; date strings → NaN; `None`/empty → NaN; `PatientNr` absent from cleaned dict.
+- `load_splits_and_config`: `PatientNr` not in `feature_names`; `None` and invalid-string features cleaned to NaN.
+- `compute_clin_stats`: NaN values excluded from mean/std (nanmean/nanstd); all-NaN feature gets `mean=0, std≈1`; missing key excluded from mean (not treated as 0).
+- `NormalizeClinicald`: NaN imputed to `0.0` (z=0 = training mean) after normalising; sentinel patient gets z=0; output is fully finite even with NaN inputs.
+- `build_data_list`: NaN preserved in `clin` array (no premature `nan_to_num`); sentinel-replaced NaN reaches array correctly.
 
 ---
 

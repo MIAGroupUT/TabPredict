@@ -76,6 +76,36 @@ Each patient is stored as a top-level key `<patient_id>_<site>` (e.g. `0042_RNST
 }
 ```
 
+### Clinical Feature Preprocessing
+
+Raw RADAR fields are cleaned by `_clean_clinical_features` before any statistics are computed or the model sees them:
+
+| Input value | Treatment | Reason |
+|---|---|---|
+| `999`, `9999`, `99999` (any numeric type or string) | → `NaN` | RADAR sentinel codes for "not measured / not applicable". Feeding them to `compute_clin_stats` inflates the mean to ~8000 for affected features and destroys z-normalisation. |
+| `None` / empty string | → `NaN` | Missing record — imputed to training mean after normalisation. |
+| Non-numeric string (e.g. `"2010-12-07"`) | → `NaN` | Date fields and free text. Previously silently became `0.0`. |
+| `PatientNr` key | Excluded entirely | Database ID (up to ~1e8). Has no clinical meaning and is dropped from `feature_names` so it never enters the feature vector. |
+| Any other float | Passed through | Real measurement. |
+
+**Missing-value imputation flow:**
+
+```
+raw 9999  →  _clean_clinical_features  →  NaN
+                                             ↓
+                               build_data_list (NaN preserved)
+                                             ↓
+                              NormalizeClinicald: z = (NaN − mean) / std  →  NaN
+                                             ↓
+                              torch.nan_to_num(nan=0.0)  →  z = 0.0 = training mean
+```
+
+Imputing to z=0 (the training mean) is the most agnostic choice: the feature carries no signal for this patient, and the L1 feature gate can cheaply zero it out without penalising the model.
+
+**Statistics are computed on observed values only** (`np.nanmean` / `np.nanstd`). Features that are 100% missing in the training split receive `mean=0, std=1` so they always normalise to z=0 and add no gradient.
+
+Of the 241 raw features, 99 are 100% missing in training, 155 are >80% missing. Only ~25 features have <30% missing and carry real clinical signal (age, BMI, ASA score, smoking history, AAA diameter, cardiac/renal comorbidities, vascular anatomy flags).
+
 ### Ground Truth Notes
 
 - **`sac_regression`** — 1 if max aortic diameter decreased ≥ 5 mm vs. baseline
@@ -135,16 +165,38 @@ Run once and stored by MONAI's `CacheDataset` (in-RAM caching). Applied to every
 
 ### Runtime Transforms (`get_train_runtime_transforms`, `get_val_runtime_transforms`)
 
-Applied on-the-fly at training time via `RuntimeDataset`, on top of the cached tensors:
+Applied on-the-fly at training time via `RuntimeDataset`, on top of the cached tensors.
 
-**Training:**
-- `RandGaussianNoise` — adds small Gaussian noise to CT channel
-- `RandBiasField` — random low-frequency intensity modulation
-- `RandScaleIntensity` — random global intensity scale
-- `NormalizeClinicald` — z-normalises clinical feature vector using pre-computed mean/std
+**Training — spatial augmentations** (applied to `ct`, `lbl`, and `dst` together, before `BuildCTAd`):
+
+All three volumes must be warped identically so the lumen mask and distance map stay geometrically aligned with the CT. Spatial transforms therefore use the key list `["ct", "lbl", "dst"]` and run before `BuildCTAd` merges them into the 4-channel tensor.
+
+| Transform | Config | Purpose |
+|---|---|---|
+| `RandFlipd` axis=0 | p=0.5 | Left-right flip (R axis) |
+| `RandFlipd` axis=1 | p=0.5 | Anterior-posterior flip (A axis) |
+| `RandFlipd` axis=2 | p=0.4 | Superior-inferior flip (S axis) |
+| `RandRotate90d` axes=(0,1) | p=0.5, max_k=3 | 0/90/180/270° axial-plane rotation |
+| `RandAffined` | p=0.3, ±10° all axes, ±10/10/5 vox translation | Patient tilt and table offset |
+| `RandZoomd` | p=0.3, 85–115%, keep_size=True | Body size variation |
+
+Note: `RandZoomd` and `RandAffined` do not recompute the pre-stored `aaa_metrics` scalars — those remain the clinically authoritative values.
+
+**Training — intensity augmentations** (applied to `ct` only — `lbl` is a label map and `dst` a distance field):
+
+| Transform | Config | Purpose |
+|---|---|---|
+| `RandAdjustContrastd` | p=0.3, γ=0.7–1.3 | Scanner-to-scanner contrast variation |
+| `RandShiftIntensityd` | p=0.3, ±0.1 | HU calibration offset |
+| `RandScaleIntensityd` | p=0.5, ±15% | Multiplicative intensity scaling |
+| `RandBiasFieldd` | p=0.2, coeff=0–0.3 | Low-frequency field inhomogeneity |
+| `RandGaussianNoised` | p=0.3, σ=0.05 | Detector noise |
+| `RandGaussianSmoothd` | p=0.2, σ_z=0.25–0.5 (half of σ_xy) | Reconstruction kernel variation; σ_z is narrower to match the 3 mm axial slice spacing |
+
+With all augmentations active, at least one fires on ≈98% of training samples.
 
 **Validation:**
-- `NormalizeClinicald` only (no augmentation)
+- `BuildCTAd` + `ToTensord` + `NormalizeClinicald` only — no augmentation.
 
 ### `BuildCTAd`
 
