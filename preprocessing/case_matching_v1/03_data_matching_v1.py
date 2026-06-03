@@ -238,22 +238,38 @@ def _find_visit_date(fu_num: int, row: dict, df_columns: list) -> datetime.date 
     return None
 
 
+def _extract_ae_number(col_name: str) -> int | None:
+    """Extract adverse-event number from column name, e.g. 'AE3_AE_...' → 3."""
+    m = re.match(r"^AE(\d+)_", col_name, re.I)
+    return int(m.group(1)) if m else None
+
+
+def _find_ae_date(ae_num: int, row: dict, df_columns: list) -> datetime.date | None:
+    """Return event date for AE{ae_num} from AE{N}_AE_AE_EDate(_suffix)? columns."""
+    for c in df_columns:
+        if re.match(rf"^AE{ae_num}_AE_AE_EDate", c, re.I):
+            d = _parse_op_date(row.get(c))
+            if d is not None:
+                return d
+    return None
+
+
 # =========================================================
 # GROUND TRUTH EXTRACTION
 # =========================================================
 
 COMP_PATTERNS = {
-    "endoleak_1a": r"Endoleak_spec_.*answer0",
-    "endoleak_1b": r"Endoleak_spec_.*answer(1|2)",
-    "endoleak_2":  r"Endoleak_spec_.*answer(3|4|5|6)",
-    "endoleak_3":  r"Endoleak_spec_.*answer(7|8)",
-    "endoleak_5":  r"Endoleak_spec_.*answer11",
+    "endoleak_1a": r"Endoleak_spec_.*answer0$",
+    "endoleak_1b": r"Endoleak_spec_.*answer(1|2)$",
+    "endoleak_2":  r"Endoleak_spec_.*answer(3|4|5|6)$",
+    "endoleak_3":  r"Endoleak_spec_.*answer(7|8)$",
+    "endoleak_5":  r"Endoleak_spec_.*answer11$",
     "occlusion":   r"Occlusion_",
     "stenosis":    r"Stenosis_",
     "kinking":     r"Kinking_",
     "fracture":    r"Fract_",
-    "migration":   r"Endograft_Spc.*answer1",
-    "infection":   r"Endograft_Spc.*answer2",
+    "migration":   r"Endograft_Spc.*answer1$",
+    "infection":   r"Endograft_Spc.*answer2$",
 }
 
 
@@ -327,21 +343,40 @@ def extract_ground_truth(row, df_columns: list, op_date: datetime.date | None = 
 
         timing = None
         if flagged_cols:
-            fu_tagged = []
+            candidates = []
             for c in flagged_cols:
-                n = _extract_fu_number(c)
-                if n is not None:
-                    fu_tagged.append((c, n))
-            fu_tagged.sort(key=lambda x: x[1])
-            if fu_tagged:
-                _, first_fu = fu_tagged[0]
-                visit_date = _find_visit_date(first_fu, row, df_columns)
-                days = (visit_date - op_date).days if (visit_date and op_date) else None
-                timing = {
-                    "first_fu":    first_fu,
-                    "first_date":  visit_date.isoformat() if visit_date else None,
-                    "days_from_op": days,
-                }
+                fu_n = _extract_fu_number(c)
+                ae_n = _extract_ae_number(c)
+                if fu_n is not None:
+                    d = _find_visit_date(fu_n, row, df_columns)
+                    days = (d - op_date).days if (d and op_date) else None
+                    candidates.append({
+                        "source":        "FU",
+                        "number":        fu_n,
+                        "first_date":    d.isoformat() if d else None,
+                        "days_from_op":  days,
+                        "triggered_field": c,
+                    })
+                elif ae_n is not None:
+                    d = _find_ae_date(ae_n, row, df_columns)
+                    days = (d - op_date).days if (d and op_date) else None
+                    candidates.append({
+                        "source":        "AE",
+                        "number":        ae_n,
+                        "first_date":    d.isoformat() if d else None,
+                        "days_from_op":  days,
+                        "triggered_field": c,
+                    })
+                else:
+                    candidates.append({
+                        "source":        "unknown",
+                        "number":        None,
+                        "first_date":    None,
+                        "days_from_op":  None,
+                        "triggered_field": c,
+                    })
+            dated = [c for c in candidates if c["days_from_op"] is not None]
+            timing = min(dated, key=lambda x: x["days_from_op"]) if dated else candidates[0]
         comp_timing[label] = timing
 
     return {
@@ -841,9 +876,14 @@ def _print_analysis_report(
                         date_str = timing.get("first_date") or "no date"
                         days_str = (f"+{timing['days_from_op']}d"
                                     if timing.get("days_from_op") is not None else "days n/a")
-                        fprint(f"    {key}: first at FU{timing['first_fu']} ({date_str}, {days_str})")
+                        src, num = timing.get("source", "?"), timing.get("number")
+                        label_str = (f"FU{num}" if src == "FU"
+                                     else f"AE {num}" if src == "AE"
+                                     else f"{src} {num}" if num else src)
+                        field = timing.get("triggered_field", "?")
+                        fprint(f"    {key}: first at {label_str} ({date_str}, {days_str}, triggered: {field})")
                     else:
-                        fprint(f"    {key}: (no FU-prefixed column found)")
+                        fprint(f"    {key}: (no complication event found)")
             else:
                 pids = sorted(k for k, _ in patients)
                 fprint(f"  {site} ({len(pids)}): {', '.join(pids)}")
