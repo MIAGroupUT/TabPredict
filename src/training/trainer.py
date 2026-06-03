@@ -508,7 +508,7 @@ def run_pipeline(cfg: dict) -> None:
                 torch.save(
                     {
                         "state_dict":    get_model(model).state_dict(),
-                        "threshold":     val_metrics.get("val/reint_recall_thresh", 0.5),
+                        "threshold":     val_metrics.get("val/reint_best_thresh", 0.5),
                         "feature_names": feature_names,
                         "clin_mean":     clin_mean.tolist(),
                         "clin_std":      clin_std.tolist(),
@@ -524,7 +524,7 @@ def run_pipeline(cfg: dict) -> None:
                     f"(F{recall_beta:.0f}={best_val_fbeta:.4f}, "
                     f"AUC={val_metrics.get('val/reint_auc', 0):.4f}, "
                     f"rec={val_metrics.get('val/reint_recall', 0):.4f}, "
-                    f"thresh={val_metrics.get('val/reint_recall_thresh', 0):.3f}@{threshold_recall_target:.0%}rec)"
+                    f"thresh={val_metrics.get('val/reint_best_thresh', 0):.3f}@F{recall_beta:.0f})"
                 )
             else:
                 patience_counter += 1
