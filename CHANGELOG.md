@@ -9,10 +9,7 @@ Entries are grouped by push milestone (no formal version tags yet).
 
 ## [Unreleased]
 
-### Changed
-
-- **`v1_no_complications.yaml`**: `clinical_backbone` `mlp` → `tabm`; `checkpoint_dir` / `run_name` updated to `TabM_03062026` for next TabM no-comp run.
-- **`v1_with_complications.yaml`**: `clinical_backbone` `tabm` → `mlp`; `checkpoint_dir` / `run_name` updated to `MLP_03062026` for next MLP with-comp run.
+_No unreleased changes._
 
 ---
 
@@ -45,7 +42,8 @@ Entries are grouped by push milestone (no formal version tags yet).
 
 - **TabM `d_block` 128 → 64; `d_embedding` 16 → 8** in both experiment YAMLs. At `d_block=128` the TabM clinical branch had 671K parameters = 10,646 per training positive — severely over-parameterised for a 63-positive dataset. Reducing to `d_block=64` and `d_embedding=8` brings this to ~282K = ~4,474 per positive, a more reasonable ratio while retaining the ensemble benefit of `k=16` members.
 - **`v1_with_complications.yaml`**: `clinical_backbone` set to `tabm` and `checkpoint_dir` updated to `v1_with_complications_TabM_03062026` for the next TabM training run with the corrected sentinel handling and reduced `d_block`.
-- **`v1_no_complications.yaml`**: `clinical_backbone` remains `mlp`; `checkpoint_dir` updated to `v1_no_complications_MLP_03062026`.
+- **`v1_no_complications.yaml`**: `clinical_backbone` set to `tabm`; `checkpoint_dir` updated to `v1_no_complications_TabM_03062026`.
+- **Crop script (`06_crop_full_body_scans.py`)**: `metricsTr/*.json` now copied to `metricsTr{suffix}/` when `--suffix` is set (previously absent, making suffixed directories unusable for training); dry-run crop counter fixed (`[DRY ]` tags now counted as would-crop, not skipped); non-CT copy loop prints flush=True with a progress counter every 50 files so SLURM logs confirm progress.
 
 ---
 
