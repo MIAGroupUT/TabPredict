@@ -341,31 +341,61 @@ def main() -> None:
             suffix=suffix,
         )
         print(status)
-        if "[CROP]" in status:
+        # [CROP] = actual crop; [DRY ] = dry-run crop; [SKIP] = no crop needed
+        if "[CROP]" in status or "[DRY ]" in status:
             n_cropped += 1
         else:
             n_skipped += 1
 
-    # Copy non-CT modality files verbatim when writing to a suffixed directory.
-    # These files have no segmentation mask so cropping is not applicable.
+    # ── non-CT images (other modalities) ─────────────────────────────────────
+    # Copy verbatim — no segmentation mask exists for these so cropping is N/A.
     n_other = 0
     if suffix and other_scans:
         out_images = base / f"imagesTr{suffix}"
         print(f"\nCopying {len(other_scans)} non-CT file(s) to imagesTr{suffix}/ ...")
         for src in other_scans:
             dst = out_images / src.name
-            if not dry_run:
+            if not args.dry_run:
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, dst)
             n_other += 1
         action = "would copy" if args.dry_run else "copied"
         print(f"  {action} {n_other} non-CT file(s)")
 
+    # ── AAA geometry metrics (metricsTr/) ─────────────────────────────────────
+    # JSON files are derived from the label masks, not the CT volume, so they
+    # need no cropping — but they MUST be present in the suffixed directory
+    # because build_data_list() reads them directly for the aaa_metrics branch.
+    n_metrics = 0
+    if suffix:
+        metrics_src = base / "metricsTr"
+        metrics_dst = base / f"metricsTr{suffix}"
+        if metrics_src.exists():
+            metric_files = sorted(metrics_src.glob("*.json"))
+            if metric_files:
+                print(f"\nCopying {len(metric_files)} metric JSON file(s) to metricsTr{suffix}/ ...")
+                for src in metric_files:
+                    dst = metrics_dst / src.name
+                    if not args.dry_run:
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(src, dst)
+                    n_metrics += 1
+                action = "would copy" if args.dry_run else "copied"
+                print(f"  {action} {n_metrics} metric JSON file(s)")
+        else:
+            print(f"\n[WARN] metricsTr/ not found under {base} — run step 05 first")
+
     print(f"\n{'=' * 62}")
     if args.dry_run:
-        print(f"DRY RUN complete — would crop {n_cropped}, skip {n_skipped}, copy {n_other} non-CT")
+        print(
+            f"DRY RUN complete — would crop {n_cropped}, skip/copy {n_skipped}, "
+            f"copy {n_other} non-CT image(s), copy {n_metrics} metric JSON(s)"
+        )
     else:
-        print(f"DONE — cropped {n_cropped}, skipped {n_skipped}, copied {n_other} non-CT")
+        print(
+            f"DONE — cropped {n_cropped}, skip/copied {n_skipped}, "
+            f"copied {n_other} non-CT image(s), copied {n_metrics} metric JSON(s)"
+        )
     print(f"{'=' * 62}")
 
 
