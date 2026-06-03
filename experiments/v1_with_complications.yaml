@@ -43,7 +43,7 @@ model:
     - migration
     - infection
   aaa_dim: 5
-  clinical_backbone: tabm        # mlp | tabm
+  clinical_backbone: mlp        # mlp | tabm
   tabm:                         # only used when clinical_backbone: tabm
     k: 16                       # ensemble members (paper default 32; 16 for small data)
     n_blocks: 2
@@ -118,9 +118,9 @@ training:
 
 paths:
   base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_with_complications_TabM_03062026
+  checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_with_complications_MLP_03062026
 
 wandb:
   project: AAA-Reintervention-Risk
-  run_name: v1_with_complications_tabm
+  run_name: v1_with_complications_mlp
   mode: online

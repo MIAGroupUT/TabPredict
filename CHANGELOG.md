@@ -9,6 +9,15 @@ Entries are grouped by push milestone (no formal version tags yet).
 
 ## [Unreleased]
 
+### Changed
+
+- **`v1_no_complications.yaml`**: `clinical_backbone` `mlp` → `tabm`; `checkpoint_dir` / `run_name` updated to `TabM_03062026` for next TabM no-comp run.
+- **`v1_with_complications.yaml`**: `clinical_backbone` `tabm` → `mlp`; `checkpoint_dir` / `run_name` updated to `MLP_03062026` for next MLP with-comp run.
+
+---
+
+## [2026-06-03] — Augmentation pipeline; sentinel fix; TabM sizing; DataLoader OOM fix; crop script
+
 ### Added
 
 - **Expanded training augmentation pipeline** in `get_train_runtime_transforms` (`src/data/loaders.py`) — 12 transforms total, up from 3. Augmentation now fires on ≈98% of samples, effectively presenting a unique view of every training case each epoch.
