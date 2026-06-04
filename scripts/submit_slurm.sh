@@ -11,18 +11,24 @@
 #     sbatch --job-name=v1_comp     scripts/submit_slurm.sh train \
 #         --config experiments/v1_with_complications.yaml
 #
-#   Testing — all stage checkpoints automatically (stage_a + stage_b):
+#   Testing — all splits × all stage checkpoints (results in <output_dir>/<split>/<stage>/):
 #     sbatch --job-name=test_no_comp scripts/submit_slurm.sh test \
 #         --config     experiments/v1_no_complications.yaml \
 #         --output_dir /home/ranema/AI4EVAR/test_results/v1_no_complications \
-#         --gradcam
+#         --split all
 #
-#   Testing — single checkpoint only:
+#   Testing — single checkpoint, test split only (results in <output_dir>/test/):
 #     sbatch --job-name=test_no_comp scripts/submit_slurm.sh test \
 #         --config     experiments/v1_no_complications.yaml \
 #         --checkpoint /home/ranema/AI4EVAR/checkpoints/v1_no_complications/best_stage_b.pt \
 #         --output_dir /home/ranema/AI4EVAR/test_results/v1_no_complications \
-#         --gradcam
+#         --split test
+#
+#   Testing — fast metrics-only run (skip GradCAM PNGs):
+#     sbatch --job-name=test_no_comp scripts/submit_slurm.sh test \
+#         --config     experiments/v1_no_complications.yaml \
+#         --output_dir /home/ranema/AI4EVAR/test_results/v1_no_complications \
+#         --split all --no-gradcam
 # ─────────────────────────────────────────────────────────────────────────────
 
 #SBATCH --job-name=ai4evar

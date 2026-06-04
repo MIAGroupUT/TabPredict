@@ -13,7 +13,7 @@ _No unreleased changes._
 
 ---
 
-## [2026-06-04] — Classical LR backbones; train metrics; multi-split eval; XAI fix; config renames
+## [2026-06-04] — Classical LR backbones; train metrics; multi-split eval; eval notebook; XAI fix; config renames
 
 ### Added
 
@@ -31,6 +31,7 @@ _No unreleased changes._
 - **`max_missing_pct: 0.5`** config key under `training:` in both DL experiment YAMLs.
 - **`xgboost==3.2.0`** added to `requirements.txt` and `requirements-ci.txt`.
 - **41 tests in `tests/test_baselines.py`** covering `TabularBaseline` (shape, NaN handling, save/load, predict-before-fit guard), `ClassicalBranchWrapper` (zeros before fit, forward shape/no-NaN after fit, gradients through projection layer, serialize/deserialize), `is_classical_backbone`, and `fit_classical_backbone` integration. Total suite: 353 tests.
+- **`eval/compare_results.ipynb`** — new Jupyter notebook for interactive results comparison. Auto-detects both the new (`<run>/<split>/<stage>/`) and legacy flat result layouts. Features: dark-themed summary table with pastel AUC/F1/sensitivity gradients and gold best-value indicators; joined ROC curves with per-curve fill and best-operating-point markers; per-metric bar chart. Grouping controlled by `ROC_GROUP_BY` (`"run"` / `"stage"` / `"split"` / `"run+stage"`) — a single config change switches between comparing methods, stages, or train/val/test splits.
 
 ### Fixed
 
@@ -52,6 +53,7 @@ _No unreleased changes._
 - **`gate_l1_weight` 0.0005 → 0.0001** in both DL experiment YAMLs. With the missingness filter reducing gate input from 240 to ~42 features, lower L1 allows selective sparsity rather than blanket suppression.
 - **`v1_no_complications.yaml`**: `clinical_backbone` tabm → mlp; `backbone_cfg:` key; checkpoint dir updated to `…_MLP_…`.
 - **`v1_with_complications.yaml`**: `clinical_backbone` mlp → tabm; `backbone_cfg:` key; checkpoint dir updated to `…_TabM_…`.
+- **`scripts/submit_slurm.sh` test usage comments** corrected: removed invalid `--gradcam` flag (GradCAM is on by default; use `--no-gradcam` to disable), replaced with `--split all` for the multi-stage run and `--split test` for the single-checkpoint run; added a third `--no-gradcam` example for fast metrics-only runs.
 
 ---
 
