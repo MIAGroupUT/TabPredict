@@ -75,7 +75,7 @@ def test_validate_no_comp_returns_tuple(mock_wandb, model_no_comp):
     from src.training.trainer import validate
 
     criterion = ReinterventionLoss(device=torch.device("cpu"))
-    val_loss, metrics = validate(
+    val_loss, metrics, _ = validate(
         model_no_comp, _FakeLoader([_make_reint_batch()]),
         criterion, complications=[],
     )
@@ -96,7 +96,7 @@ def test_validate_no_comp_required_keys(mock_wandb, model_no_comp):
         "val/reint_TPR", "val/reint_TNR", "val/reint_FPR", "val/reint_FNR",
     }
     criterion = ReinterventionLoss(device=torch.device("cpu"))
-    _, metrics = validate(
+    _, metrics, _ = validate(
         model_no_comp, _FakeLoader([_make_reint_batch()]),
         criterion, complications=[],
     )
@@ -110,7 +110,7 @@ def test_validate_no_comp_has_no_comp_keys(mock_wandb, model_no_comp):
     from src.training.trainer import validate
 
     criterion = ReinterventionLoss(device=torch.device("cpu"))
-    _, metrics = validate(
+    _, metrics, _ = validate(
         model_no_comp, _FakeLoader([_make_reint_batch()]),
         criterion, complications=[],
     )
@@ -123,7 +123,7 @@ def test_validate_no_comp_metrics_in_range(mock_wandb, model_no_comp):
     from src.training.trainer import validate
 
     criterion = ReinterventionLoss(device=torch.device("cpu"))
-    _, metrics = validate(
+    _, metrics, _ = validate(
         model_no_comp, _FakeLoader([_make_reint_batch()]),
         criterion, complications=[],
     )
@@ -139,7 +139,7 @@ def test_validate_fbeta_threshold_in_range(mock_wandb, model_no_comp):
     from src.training.trainer import validate
 
     criterion = ReinterventionLoss(device=torch.device("cpu"))
-    _, metrics = validate(
+    _, metrics, _ = validate(
         model_no_comp, _FakeLoader([_make_reint_batch()]),
         criterion, complications=[],
     )
@@ -153,7 +153,7 @@ def test_validate_best_fbeta_in_range(mock_wandb, model_no_comp):
     from src.training.trainer import validate
 
     criterion = ReinterventionLoss(device=torch.device("cpu"))
-    _, metrics = validate(
+    _, metrics, _ = validate(
         model_no_comp, _FakeLoader([_make_reint_batch()]),
         criterion, complications=[], recall_beta=2.0,
     )
@@ -167,10 +167,10 @@ def test_validate_fbeta_changes_with_beta(mock_wandb, model_no_comp):
     from src.training.trainer import validate
 
     criterion = ReinterventionLoss(device=torch.device("cpu"))
-    _, m1 = validate(model_no_comp, _FakeLoader([_make_reint_batch()]),
+    _, m1, _ = validate(model_no_comp, _FakeLoader([_make_reint_batch()]),
                      criterion, complications=[], recall_beta=1.0)
     mock_wandb.reset_mock()
-    _, m2 = validate(model_no_comp, _FakeLoader([_make_reint_batch()]),
+    _, m2, _ = validate(model_no_comp, _FakeLoader([_make_reint_batch()]),
                      criterion, complications=[], recall_beta=2.0)
     # beta=1 (F1) and beta=2 (F2) can produce the same optimal threshold on trivial
     # inputs, but the metric values must both be computable and finite
@@ -191,7 +191,7 @@ def test_validate_all_same_gt_gives_auc_half(mock_wandb, model_no_comp):
         "reintervention_label": torch.ones(BATCH),   # all positive
     }
     criterion = ReinterventionLoss(device=torch.device("cpu"))
-    _, metrics = validate(
+    _, metrics, _ = validate(
         model_no_comp, _FakeLoader([batch]),
         criterion, complications=[],
     )
@@ -221,7 +221,7 @@ def test_validate_with_comp_has_comp_mean_auc(mock_wandb, model_with_comp):
     from src.training.trainer import validate
 
     criterion = MultiTaskReinterventionLoss(device=torch.device("cpu"))
-    _, metrics = validate(
+    _, metrics, _ = validate(
         model_with_comp, _FakeLoader([_make_comp_batch()]),
         criterion, complications=COMPLICATIONS,
     )
@@ -236,7 +236,7 @@ def test_validate_with_comp_still_has_reint_keys(mock_wandb, model_with_comp):
     from src.training.trainer import validate
 
     criterion = MultiTaskReinterventionLoss(device=torch.device("cpu"))
-    _, metrics = validate(
+    _, metrics, _ = validate(
         model_with_comp, _FakeLoader([_make_comp_batch()]),
         criterion, complications=COMPLICATIONS,
     )

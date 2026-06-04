@@ -89,6 +89,32 @@ def load_splits_and_config(base_dir: Path) -> tuple[dict, dict, list[str]]:
     return splits, config, feature_names
 
 
+def filter_features_by_missingness(
+    train_ids: list[str],
+    config: dict,
+    feature_names: list[str],
+    max_missing_pct: float = 1.0,
+) -> list[str]:
+    """Drop features that are missing in more than max_missing_pct of training patients.
+
+    Missingness is computed on the training split only to avoid leaking val/test
+    statistics into feature selection.  The returned list preserves the original
+    sort order so downstream indexing stays consistent.
+    """
+    if max_missing_pct >= 1.0:
+        return feature_names
+    n = len(train_ids)
+    kept = []
+    for k in feature_names:
+        n_missing = sum(
+            1 for pid in train_ids
+            if np.isnan(config.get(pid, {}).get("pre_op_features", {}).get(k, np.nan))
+        )
+        if n_missing / n < max_missing_pct:
+            kept.append(k)
+    return kept
+
+
 def compute_clin_stats(
     train_ids: list[str],
     config: dict,
@@ -212,6 +238,41 @@ def _load_aaa_metrics(path) -> list[float]:
         m.get("max_lumen_to_wall_dist_mm", 0.0),
         m.get("avg_lumen_to_wall_dist_mm", 0.0),
     ]
+
+
+def build_tabular_arrays(
+    ids: list[str],
+    config: dict,
+    feature_names: list[str],
+) -> tuple[np.ndarray, np.ndarray, list[str]]:
+    """Extract tabular features and labels as raw numpy arrays.
+
+    Returns:
+        X     (N, len(feature_names) + 5) float32 — clinical features (raw, NaN for
+              missing values) concatenated with 5 raw AAA geometry scalars
+        y     (N,) float32 — reintervention binary labels
+        pids  patient IDs in the same order as rows
+
+    NaN values in X represent missing clinical measurements; callers are
+    responsible for imputation (e.g. median or mean) before passing to a model.
+    """
+    X_rows, y_vals, pids = [], [], []
+    for pid in ids:
+        pdata     = config.get(pid, {})
+        clin_dict = pdata.get("pre_op_features", {})
+        clin      = np.array(
+            [clin_dict.get(k, np.nan) for k in feature_names], dtype=np.float32
+        )
+        pre_op = (pdata.get("scans", {}).get("pre_op")) or {}
+        aaa    = np.array(_load_aaa_metrics(pre_op.get("metrics")), dtype=np.float32)
+        X_rows.append(np.concatenate([clin, aaa]))
+        y_vals.append(float(pdata.get("ground_truth", {}).get("reintervention", 0)))
+        pids.append(pid)
+    return (
+        np.stack(X_rows).astype(np.float32),
+        np.array(y_vals, dtype=np.float32),
+        pids,
+    )
 
 
 # ── MONAI transforms ─────────────────────────────────────────────────────────

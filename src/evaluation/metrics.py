@@ -9,6 +9,9 @@ import csv
 import json
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.metrics import (
     accuracy_score,
@@ -18,6 +21,7 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
     roc_auc_score,
+    roc_curve,
 )
 
 
@@ -101,6 +105,70 @@ def save_metrics(metrics: dict, out_dir: Path) -> None:
                     writer.writerow([f"auc_{comp}", auc])
             else:
                 writer.writerow([k, v])
+
+
+def plot_roc_curve(
+    probs: list[float],
+    gt: list[int],
+    title: str = "",
+    threshold: float | None = None,
+    comp_probs: "np.ndarray | None" = None,
+    comp_gt: "np.ndarray | None" = None,
+    comp_names: list[str] | None = None,
+) -> plt.Figure:
+    """Plot ROC curve(s) and return the matplotlib Figure.
+
+    The caller is responsible for saving (fig.savefig) or passing to wandb.Image.
+    Per-complication curves are added as dashed lines when comp_* args are provided.
+    GT value -1 in comp_gt is treated as missing and excluded per complication.
+    """
+    probs_arr = np.array(probs)
+    gt_arr    = np.array(gt).astype(int)
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+
+    if len(np.unique(gt_arr)) > 1:
+        fpr, tpr, _ = roc_curve(gt_arr, probs_arr)
+        auc_val     = roc_auc_score(gt_arr, probs_arr)
+        ax.plot(fpr, tpr, color="steelblue", lw=2.5,
+                label=f"Reintervention  AUC = {auc_val:.3f}", zorder=3)
+        ax.fill_between(fpr, tpr, alpha=0.08, color="steelblue")
+
+        if threshold is not None:
+            preds  = (probs_arr > threshold).astype(int)
+            tp = int(((preds == 1) & (gt_arr == 1)).sum())
+            fp = int(((preds == 1) & (gt_arr == 0)).sum())
+            fn = int(((preds == 0) & (gt_arr == 1)).sum())
+            tn = int(((preds == 0) & (gt_arr == 0)).sum())
+            op_fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+            op_tpr = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+            ax.scatter([op_fpr], [op_tpr], color="crimson", s=80, zorder=5,
+                       label=f"Operating point  t = {threshold:.3f}")
+
+    if comp_probs is not None and comp_gt is not None and comp_names:
+        colors = plt.cm.tab10(np.linspace(0, 0.9, len(comp_names)))
+        for i, (name, color) in enumerate(zip(comp_names, colors)):
+            valid = comp_gt[:, i] != -1
+            if valid.sum() < 2 or len(np.unique(comp_gt[valid, i])) < 2:
+                continue
+            y_t = comp_gt[valid, i]
+            y_p = comp_probs[valid, i]
+            fpr_c, tpr_c, _ = roc_curve(y_t, y_p)
+            auc_c = roc_auc_score(y_t, y_p)
+            ax.plot(fpr_c, tpr_c, lw=1.2, linestyle="--", color=color, alpha=0.75,
+                    label=f"{name}  {auc_c:.3f}")
+
+    ax.plot([0, 1], [0, 1], "k--", lw=1, alpha=0.35)
+    ax.set_xlabel("False Positive Rate  (1 − Specificity)")
+    ax.set_ylabel("True Positive Rate  (Sensitivity / Recall)")
+    ax.set_xlim([0.0, 1.0])
+    ax.set_ylim([0.0, 1.02])
+    ax.legend(loc="lower right", fontsize=8)
+    if title:
+        ax.set_title(title, fontsize=11)
+    ax.grid(alpha=0.25)
+    fig.tight_layout()
+    return fig
 
 
 def label_type(pred: int, gt: int) -> str:

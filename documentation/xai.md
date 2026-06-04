@@ -42,7 +42,7 @@ Computes the gradient of the predicted reintervention probability with respect t
 importance_i = |∂ sigmoid(logit) / ∂ clin_i|
 ```
 
-The top-20 features by absolute gradient magnitude are returned, together with their importance score (normalised to [0, 1] within the batch) and a categorical level (`"HIGH"` / `"MED"` / `"LOW"`).
+The top-20 features by absolute gradient magnitude are returned. Scores are normalised to [0, 1] within the clinical group (divided by the max gradient across all clinical features). Categorical levels follow the same thresholds as AAA importance: `"HIGH"` (score > 0.7), `"MED"` (score > 0.3), `"LOW"` (otherwise).
 
 This tells you which clinical features most influenced the specific prediction for this patient — not a global feature ranking.
 

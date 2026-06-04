@@ -9,7 +9,42 @@ Entries are grouped by push milestone (no formal version tags yet).
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Added
+
+- **Classical ML tabular backbones** — `src/models/baselines.py` adds `TabularBaseline` (standalone sklearn Pipeline wrapper for LR / RF / GBM / XGBoost) and `ClassicalBranchWrapper(nn.Module)` (fits a `TabularBaseline` and projects its scalar `predict_proba` output to 32-dim via a learnable `Linear(1→32)`, enabling gradient flow into the FiLM fusion and visual branch). Set `clinical_backbone: lr | rf | gbm | xgboost` in any experiment YAML to use — the visual branch and all downstream fusion parameters continue to train normally via backprop.
+- **`fit_classical_backbone()`** in `src/training/trainer.py` — fits the sklearn model once on z-normalised clinical + raw AAA features (exact same distribution as DataLoader inference) before Stage A begins. Called automatically when a classical backbone is detected.
+- **`is_classical_backbone(model)`** in `src/models/reintervention.py` — helper that returns `True` when the tabular branch is a `ClassicalBranchWrapper`; used to skip the feature gate and gate L1 throughout training.
+- **`build_tabular_arrays()`** in `src/data/loaders.py` — extracts `(X, y, pids)` as raw numpy arrays (NaN preserved, no MONAI transforms) for use by the classical backbone fitting step.
+- **4 new experiment configs**: `v1_logistic_regression.yaml`, `v1_random_forest.yaml`, `v1_gradient_boosting.yaml`, `v1_xgboost.yaml` — full pipeline configs with the same 2-stage structure as the DL experiments. Submit exactly as with MLP/TabM: `sbatch scripts/submit_slurm.sh train --config experiments/v1_random_forest.yaml`.
+- **`backbone_cfg:` config key** — replaces the old `tabm:` key for all backbone types. All 6 experiment YAMLs now use `backbone_cfg:` for hyperparameter overrides forwarded to whichever backbone is selected. Backward-compatible: the trainer and runner still fall back to `tabm:` when `backbone_cfg:` is absent.
+- **Train-set metrics logged every epoch** — `validate()` now accepts a `split` parameter; the training loop calls it twice per epoch (split="val" and split="train"), logging all metrics (`{split}/reint_auc`, `{split}/reint_f1`, etc.) and prediction tables to W&B and console under the correct prefix. Epoch summary now shows `train_loss`, `val_loss`, `train_auc`, `val_auc`, and `val_f{β}`.
+- **Train prediction tables** — `log_val_table()` also accepts `split`; logged under `eval/{split}_full_matrix_stage_{st}` every 3 epochs for both val and train.
+- **Per-stage ROC curves in W&B** (train + val) — at the end of each stage the trainer reloads the best checkpoint and logs `roc/val_stage_{st}` and `roc/train_stage_{st}` as W&B images.
+- **`roc_curve.png`** saved to output directory by `run_test()` for every evaluation run.
+- **`filter_features_by_missingness()`** in `src/data/loaders.py` — drops clinical features missing in ≥ `max_missing_pct` of training patients before stats are computed. 198/240 features (82%) are ≥50% missing; after filtering the input reduces to ~42 informative features. Computed on training split only (no leakage); `feature_names` list saved in checkpoint.
+- **`max_missing_pct: 0.5`** config key under `training:` in both DL experiment YAMLs.
+- **41 tests in `tests/test_baselines.py`** covering `TabularBaseline` (shape, NaN handling, save/load, predict-before-fit guard), `ClassicalBranchWrapper` (zeros before fit, forward shape/no-NaN after fit, gradients through projection layer, serialize/deserialize), `is_classical_backbone`, and `fit_classical_backbone` integration. Total suite: 353 tests.
+
+### Fixed
+
+- **`_clinical_importance` level assignments were inverted** in `src/xai/explainer.py`. The old code computed `pct = (grads >= s).mean()` and labelled HIGH if `pct > 0.9` — but that means only 10% of features have a lower gradient, i.e. this is near-minimum-importance. Fixed by normalising gradients to [0, 1] and applying HIGH > 0.7, MED > 0.3 (same approach as `_aaa_importance`).
+- **Removed unused `threshold_recall_target` / `val/reint_recall_thresh`** dead code. The recall-targeting threshold was computed and logged but never stored in the checkpoint or used at inference. Removed from `validate()` signature, `run_pipeline()`, W&B metrics, and both DL YAMLs. The F-beta-optimal threshold (`recall_beta: 2.0`) remains the sole threshold end-to-end.
+
+### Changed
+
+- **`validate()` signature**: added `split: str = "val"` parameter; all metric keys now use `f"{split}/..."` prefix; return value extended to 3-tuple `(loss, metrics, (probs, gt))` to expose raw arrays for ROC plotting. Default `split="val"` preserves backward compatibility.
+- **`log_val_table()`**: added `split` parameter; W&B key changed from `eval/full_matrix_stage_{st}` to `eval/{split}_full_matrix_stage_{st}`.
+- **`set_stage_a/b()` and `build_optimizer()`** in `stages.py`: `feature_gate.requires_grad` and the `feature_gate` param group are skipped when `is_classical_backbone()` is True — the gate has no gradient path through a non-differentiable branch.
+- **Gate L1 regularisation** skipped for classical backbones in the training loop (same reason).
+- **`ReinterventionRiskModel.forward()`**: classical backbones receive raw (un-gated) features; DL backbones continue to use `clin * sigmoid(feature_gate)`.
+- **`load_checkpoint()`**: restores the serialized sklearn model from `classical_baseline_bytes` key when present.
+- **Checkpoint save dict** for classical backbones includes `classical_baseline_bytes` (joblib-serialised sklearn pipeline).
+- **`--split` in `scripts/test.py`** now accepts `all` in addition to `train / val / test`. `--split all` runs all three splits across all discovered stage checkpoints. Output path is `output_dir/split/stage` (was `output_dir/stage/split`). `--checkpoint` is now optional: omitting it auto-discovers all `best_stage_*.pt` files in `cfg.paths.checkpoint_dir`.
+- **`run_test()` header** prints `{split.upper()} SET METRICS` (was hardcoded `TEST SET METRICS`).
+- **Temperature calibration** applied in `runner.py` at inference time: `prob = sigmoid(logit / temperature)` using the `temperature` key saved in the checkpoint.
+- **`gate_l1_weight` 0.0005 → 0.0001** in both DL experiment YAMLs. With the missingness filter reducing gate input from 240 to ~42 features, lower L1 allows selective sparsity rather than blanket suppression.
+- **`v1_no_complications.yaml`**: `clinical_backbone` tabm → mlp; `backbone_cfg:` key; checkpoint dir updated to `…_MLP_…`.
+- **`v1_with_complications.yaml`**: `clinical_backbone` mlp → tabm; `backbone_cfg:` key; checkpoint dir updated to `…_TabM_…`.
 
 ---
 

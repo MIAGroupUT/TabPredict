@@ -14,6 +14,7 @@ import torch
 import torch.nn as nn
 
 from merlin import Merlin
+from src.models.baselines import CLASSICAL_BACKBONES, ClassicalBranchWrapper
 
 # ── canonical complication lists (choose one per experiment config) ──────────
 
@@ -38,6 +39,11 @@ AAA_METRIC_NAMES: list[str] = [
 def get_model(m: nn.Module) -> nn.Module:
     """Unwrap nn.DataParallel."""
     return m.module if isinstance(m, nn.DataParallel) else m
+
+
+def is_classical_backbone(model: nn.Module) -> bool:
+    """True when the tabular branch is a non-differentiable classical ML model."""
+    return isinstance(get_model(model).clinical_branch, ClassicalBranchWrapper)
 
 
 def disable_checkpointing(model: nn.Module) -> None:
@@ -91,6 +97,16 @@ def load_checkpoint(
 
     filtered_state = {k: v for k, v in state.items() if k in model_keys}
     model.load_state_dict(filtered_state, strict=False)
+
+    # Restore fitted classical baseline when present in checkpoint
+    if "classical_baseline_bytes" in ckpt:
+        branch = get_model(model).clinical_branch
+        if isinstance(branch, ClassicalBranchWrapper):
+            branch.baseline = ClassicalBranchWrapper.deserialize(
+                ckpt["classical_baseline_bytes"]
+            )
+            branch._fitted = True
+
     return ckpt
 
 
@@ -174,8 +190,13 @@ class ReinterventionRiskModel(nn.Module):
     ) -> nn.Module:
         """Return the clinical encoder branch for the requested backbone.
 
-        Both variants accept ``(B, clinical_dim)`` and return ``(B, 32)``.
+        All variants accept ``(B, clinical_dim)`` and return ``(B, 32)``.
+        Classical ML variants (lr/rf/gbm/xgboost) wrap a TabularBaseline with
+        a learnable Linear(1→32) projection; the sklearn model must be fitted
+        before training via fit_classical_backbone() in trainer.py.
         """
+        if backbone in CLASSICAL_BACKBONES:
+            return ClassicalBranchWrapper(clinical_dim, backbone, **tabm_cfg)
         if backbone == "tabm":
             from src.models.tabm import TabMEmbed
             return TabMEmbed(clinical_dim=clinical_dim, out_dim=32, **tabm_cfg)
@@ -187,7 +208,8 @@ class ReinterventionRiskModel(nn.Module):
                 nn.Dropout(0.2),
             )
         raise ValueError(
-            f"Unknown clinical_backbone {backbone!r}. Choose 'mlp' or 'tabm'."
+            f"Unknown clinical_backbone {backbone!r}. "
+            f"Choose 'mlp', 'tabm', or one of {CLASSICAL_BACKBONES}."
         )
 
     def _film(self, x: torch.Tensor, gamma_beta: torch.Tensor) -> torch.Tensor:
@@ -218,7 +240,13 @@ class ReinterventionRiskModel(nn.Module):
         """
         cta   = self.cta_adapter(cta)
         v_emb = self.visual_proj(self._encode_visual(cta))
-        c_in  = torch.cat([clin * torch.sigmoid(self.feature_gate), aaa], dim=1)
+
+        # Classical backbones receive raw (un-gated) features — they handle
+        # feature importance internally.  DL backbones use the learned gate.
+        if isinstance(self.clinical_branch, ClassicalBranchWrapper):
+            c_in = torch.cat([clin, aaa], dim=1)
+        else:
+            c_in = torch.cat([clin * torch.sigmoid(self.feature_gate), aaa], dim=1)
         c_emb = self.clinical_branch(c_in)
 
         fused = torch.cat([v_emb, c_emb], dim=1)

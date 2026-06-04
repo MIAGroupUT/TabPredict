@@ -14,15 +14,16 @@ The entry point is `scripts/train.py`, which loads a YAML config and calls `src.
 
 | Frozen | Trainable |
 |---|---|
-| `visual_branch` (Merlin ViT, all layers) | `clinical_branch` (MLP) |
-| `cta_adapter` | `aaa_metrics_branch` (MLP) |
-| `visual_proj` | `reintervention_head` |
-| | `complications_head` (if present) |
+| `visual_branch` (Merlin ViT, all layers) | `clinical_branch` (MLP / TabM / classical wrapper) |
+| `cta_adapter` | `reintervention_head` |
+| `visual_proj` | `complications_head` (if present) |
 | | `condition_net` (FiLM) |
 | | `fusion_norm` |
-| | `feature_gate` |
+| | `feature_gate` (**DL backbones only**) |
 
 Goal: establish stable multimodal fusion on tabular data before the visual backbone is touched. The clinical features contain strong predictive signal, so this stage produces a meaningful baseline quickly.
+
+**Classical ML backbones (LR / RF / GBM / XGBoost):** before Stage A begins, `fit_classical_backbone()` fits the sklearn model once on z-normalised clinical + raw AAA features from the training split. During Stage A (and B) only the `Linear(1→32)` projection inside `ClassicalBranchWrapper` trains — the sklearn model is fixed. The `feature_gate` is skipped entirely (classical models perform their own feature selection) and gate L1 regularisation is not applied.
 
 ### Stage B — Backbone Adaptation
 
@@ -80,7 +81,7 @@ Added to the total loss in both variants:
 loss += gate_l1_weight × sigmoid(feature_gate).sum()
 ```
 
-This pushes feature gate values toward zero for unimportant features, producing a sparse gate after training. Default 0.005 — strong enough to force the gate to retain only ~20–30 features from the full clinical feature set, preventing overfitting given ~37 training positives.
+This pushes feature gate values toward zero for unimportant features, producing a sparse gate after training. Default 0.0001 — kept low because the gate now operates on ~42 pre-filtered features (missingness filter removes the 198 near-constant noise features). A higher L1 on the full 240-feature set caused the gate to zero out all clinical features including the informative ones.
 
 ---
 
@@ -159,15 +160,22 @@ At the end of each epoch, if validation F2-score (recall_beta=2.0) improves, the
 
 ```python
 {
-    "state_dict":     model.state_dict(),
-    "threshold":      best_threshold,      # F-beta optimal threshold
-    "feature_names":  feature_names,       # ordered list of clinical feature names
-    "clin_mean":      clin_mean,           # normalisation stats (array)
-    "clin_std":       clin_std,
-    "complications":  complications,       # list of complication names (or [])
-    "config":         cfg,                 # full YAML config dict
+    "state_dict":              model.state_dict(),
+    "threshold":               best_threshold,         # F-beta optimal threshold
+    "temperature":             temperature,            # post-hoc calibration scalar (set after all stages)
+    "feature_names":           feature_names,          # ordered list of clinical feature names
+    "clin_mean":               clin_mean,              # normalisation stats (array)
+    "clin_std":                clin_std,
+    "complications":           complications,          # list of complication names (or [])
+    "clinical_backbone":       clinical_backbone,
+    "tabm_cfg":                backbone_cfg,           # hyperparameters for the chosen backbone
+    "config":                  cfg,                    # full YAML config dict
+    # classical backbones only:
+    "classical_baseline_bytes": bytes,                 # joblib-serialised sklearn pipeline
 }
 ```
+
+`load_checkpoint()` restores `classical_baseline_bytes` automatically into the `ClassicalBranchWrapper` when present, so `test.py` works with classical configs without any extra steps.
 
 Checkpoints are written to `paths.checkpoint_dir` (see [Configuration](configuration.md)):
 - `best_stage_a.pt` — best Stage A checkpoint
@@ -181,6 +189,24 @@ Each stage has a configurable `patience` (number of epochs without F2-score impr
 
 ---
 
+## Train-Set Metrics
+
+Every epoch the trainer evaluates both val and train sets by calling `validate()` twice (once with `split="val"`, once with `split="train"`). All metrics are logged to W&B under `val/...` and `train/...` prefixes:
+
+```
+[Stage A | Epoch 003]  train_loss=0.4123  val_loss=0.4891
+[VAL]  loss=0.4891 | auc=0.61 | f1=0.54 | prec=0.52 | rec=0.57 | thresh=0.480
+[TRAIN]  loss=0.4123 | auc=0.72 | f1=0.65 | prec=0.63 | rec=0.68 | thresh=0.475
+```
+
+W&B keys: `val/reint_auc`, `train/reint_auc`, `val/reint_f1`, `train/reint_f1`, etc.
+
+Prediction tables (`eval/val_full_matrix_stage_{st}` and `eval/train_full_matrix_stage_{st}`) are logged every 3 epochs. At the end of each stage, ROC curves for both sets are uploaded as W&B images under `roc/val_stage_{st}` and `roc/train_stage_{st}`.
+
+Note: train metrics reflect balanced batches from `WeightedRandomSampler` (50/50 class ratio), not the natural 18% positive rate, so the train AUC/F1 values are higher than they would be on the raw unbalanced training split.
+
+---
+
 ## XAI During Training
 
-Every `xai_every_n_epochs` epochs, the trainer runs `full_explain()` on `xai_samples` validation patients and logs a W&B table. See [XAI](xai.md) and [W&B](wandb.md) for details.
+Every `xai_every_n_epochs` epochs, the trainer runs `full_explain()` on `xai_samples` validation patients and logs a W&B table. For classical backbones, set `xai_every_n_epochs: 999` in the config (GradCAM requires an I3ResNet backbone; clinical gradient importance is less meaningful when the clinical encoder is non-differentiable). See [XAI](xai.md) and [W&B](wandb.md) for details.

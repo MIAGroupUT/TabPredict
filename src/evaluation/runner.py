@@ -1,18 +1,19 @@
 """
-Test-set evaluation runner.
+Evaluation runner for any data split (train / val / test).
 
 Entry point: run_test(cfg, checkpoint_path, output_dir, gradcam, split)
 
-Produces, for each patient:
+output_dir is expected to already encode the split (scripts/test.py appends
+it automatically), so all files are written directly under out_dir:
+
     <out_dir>/<pid>/prediction.json
     <out_dir>/<pid>/xai.json
     <out_dir>/<pid>/xai_report.txt
-    <out_dir>/<pid>/gradcam_*.png          (only with gradcam=True)
-
-And at the parent level:
+    <out_dir>/<pid>/gradcam_*.png      (only with gradcam=True)
     <out_dir>/test_metrics.json
     <out_dir>/test_metrics.csv
     <out_dir>/test_log.txt
+    <out_dir>/roc_curve.png
 """
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ from src.evaluation.metrics import (
     compute_overall_metrics,
     format_xai_report,
     label_type,
+    plot_roc_curve,
     save_metrics,
 )
 from src.models.reintervention import ReinterventionRiskModel, load_checkpoint
@@ -87,13 +89,15 @@ def run_test(
     clin_mean     = np.array(ckpt["clin_mean"])
     clin_std      = np.array(ckpt["clin_std"])
     threshold     = float(ckpt.get("threshold", 0.5))
+    temperature   = float(ckpt.get("temperature") or 1.0)
     # Complications come from checkpoint (authoritative) or fall back to config
     complications      = ckpt.get("complications") or list(cfg["model"].get("complications") or [])
     clinical_backbone  = ckpt.get("clinical_backbone") or cfg["model"].get("clinical_backbone", "mlp")
-    tabm_cfg           = ckpt.get("tabm_cfg") or cfg["model"].get("tabm") or {}
+    tabm_cfg           = ckpt.get("tabm_cfg") or cfg["model"].get("backbone_cfg") or cfg["model"].get("tabm") or {}
 
     disable_cta = bool(cfg.get("training", {}).get("disable_cta", False))
     log(f"Threshold  : {threshold:.4f}  (from checkpoint)")
+    log(f"Temperature: {temperature:.4f}  (from checkpoint)")
     log(f"Disable CTA: {disable_cta}")
     log(f"Clin feats : {len(feature_names)}")
     log(f"Complic.   : {complications or 'none'}\n")
@@ -130,7 +134,7 @@ def run_test(
     model.eval()
     log("Model loaded.\n")
 
-    xai_engine = ReinterventionXAI(model, feature_names, complications)
+    xai_engine = ReinterventionXAI(model, feature_names, complications, temperature=temperature)
     with_comp  = bool(complications)
 
     all_probs, all_gt     = [], []
@@ -149,7 +153,7 @@ def run_test(
             cta = torch.zeros_like(cta)
         with torch.no_grad():
             outputs = model(cta, clin, aaa)
-        prob = float(torch.sigmoid(outputs[0]).item())
+        prob = float(torch.sigmoid(outputs[0] / temperature).item())
         pred = int(prob > threshold)
 
         all_probs.append(prob)
@@ -224,7 +228,7 @@ def run_test(
     )
 
     log("\n" + "=" * 62)
-    log("TEST SET METRICS")
+    log(f"{split.upper()} SET METRICS")
     log("=" * 62)
     for k, v in metrics.items():
         if k == "comp_auc_detail":
@@ -235,5 +239,22 @@ def run_test(
             log(f"  {k:<25} {v}")
 
     save_metrics(metrics, out_dir)
+
+    # ── ROC curve ─────────────────────────────────────────────────────────────
+    import matplotlib.pyplot as plt
+    cp_arr = np.stack(all_comp_probs) if all_comp_probs else None
+    cg_arr = np.stack(all_comp_gt)    if all_comp_gt    else None
+    fig = plot_roc_curve(
+        all_probs, all_gt,
+        title=f"{cfg['name']} — {split.title()} ROC",
+        threshold=threshold,
+        comp_probs=cp_arr,
+        comp_gt=cg_arr,
+        comp_names=complications or None,
+    )
+    fig.savefig(out_dir / "roc_curve.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    log(f"ROC curve saved to: {out_dir / 'roc_curve.png'}")
+
     log(f"\nAll results written to: {out_dir}")
     log_file.close()

@@ -43,7 +43,7 @@ All metrics are logged at the end of each validation epoch.
 | `val/reint_precision` | Precision at current threshold |
 | `val/reint_recall` | Recall (sensitivity) at current threshold |
 | `val/reint_accuracy` | Accuracy at current threshold |
-| `val/reint_best_thresh` | Optimal F-beta (β=2) threshold on this epoch's val set |
+| `val/reint_best_thresh` | F2-optimal threshold on this epoch's val PR curve; also stored in checkpoint |
 | `val/mean_confidence` | Mean `2×\|prob−0.5\|` across val patients (0 = uncertain, 1 = certain) |
 | `val/reint_TP` / `val/reint_FP` / `val/reint_TN` / `val/reint_FN` | Confusion matrix |
 | `val/reint_TPR` / `val/reint_TNR` / `val/reint_FPR` / `val/reint_FNR` | Derived rates |

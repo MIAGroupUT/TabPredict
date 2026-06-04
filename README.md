@@ -28,23 +28,39 @@ pip install -r requirements.txt
 ```bash
 cd /home/ranema/AI4EVAR/ai4evar
 
-# Train — primary-task model (reintervention only, default MLP clinical backbone)
+# Train — primary-task model (reintervention only, MLP clinical backbone)
 python scripts/train.py --config experiments/v1_no_complications.yaml
 
-# Train with TabM clinical backbone (no YAML edit needed)
+# Train with TabM clinical backbone
 python scripts/train.py --config experiments/v1_no_complications.yaml \
     --set model.clinical_backbone=tabm
+
+# Train with classical ML backbone (RF | LR | GBM | XGBoost)
+python scripts/train.py --config experiments/v1_random_forest.yaml
 
 # Train — multi-task model (reintervention + 7 complications)
 python scripts/train.py --config experiments/v1_with_complications.yaml
 
-# Evaluate a checkpoint
+# Evaluate on test split — GradCAM on by default
 python scripts/test.py \
     --config     experiments/v1_no_complications.yaml \
     --checkpoint /home/ranema/AI4EVAR/checkpoints/v1_no_complications/best_stage_b.pt \
     --output_dir /home/ranema/AI4EVAR/test_results/v1_no_complications
 
-# Run tests (312 tests, CPU-only, ~18 s)
+# Evaluate on all splits × all stage checkpoints in one go
+python scripts/test.py \
+    --config     experiments/v1_no_complications.yaml \
+    --output_dir /home/ranema/AI4EVAR/test_results/v1_no_complications \
+    --split all
+
+# Override checkpoint dir without editing YAML; skip GradCAM for speed
+python scripts/test.py \
+    --config     experiments/v1_no_complications.yaml \
+    --set paths.checkpoint_dir=/home/ranema/AI4EVAR/checkpoints/my_run \
+    --output_dir /home/ranema/AI4EVAR/test_results/my_run \
+    --split all --no-gradcam
+
+# Run tests (353 tests, CPU-only, ~40 s)
 ~/.conda/envs/ai4evar/bin/python -m pytest tests/ -v
 ```
 
@@ -63,20 +79,24 @@ python scripts/train.py \
 ```
 ai4evar/
 ├── experiments/          # YAML experiment configs
-│   ├── v1_no_complications.yaml
-│   └── v1_with_complications.yaml
+│   ├── v1_no_complications.yaml  # MLP backbone
+│   ├── v1_with_complications.yaml  # TabM backbone + complication heads
+│   ├── v1_logistic_regression.yaml        # Logistic Regression backbone
+│   ├── v1_random_forest.yaml        # Random Forest backbone
+│   ├── v1_gradient_boosting.yaml       # Gradient Boosting backbone
+│   └── v1_xgboost.yaml   # XGBoost backbone
 ├── scripts/              # Entry points
 │   ├── train.py          # Training
-│   ├── test.py           # Evaluation / inference
+│   ├── test.py           # Evaluation / inference (--split train|val|test|all)
 │   └── submit_slurm.sh   # SLURM wrapper
 ├── src/                  # Core library
-│   ├── models/           # ReinterventionRiskModel
+│   ├── models/           # ReinterventionRiskModel + baselines
 │   ├── data/             # MONAI pipeline + loaders
 │   ├── training/         # Losses, stages, trainer
 │   ├── xai/              # Gradient-based explainability
 │   └── evaluation/       # Metrics + per-patient output
 ├── preprocessing/        # Data preparation scripts (00–06)
-├── tests/                # CPU-only pytest suite (269 tests)
+├── tests/                # CPU-only pytest suite (353 tests)
 └── documentation/        # Detailed technical documentation
 ```
 

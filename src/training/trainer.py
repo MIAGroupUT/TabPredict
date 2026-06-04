@@ -16,6 +16,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import wandb
 from sklearn.metrics import (
     accuracy_score, confusion_matrix, f1_score,
@@ -24,15 +25,17 @@ from sklearn.metrics import (
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts
 from tqdm import tqdm
 
+from src.evaluation.metrics import plot_roc_curve
 from src.data.loaders import (
     build_loaders,
     build_data_list,
     compute_clin_stats,
+    filter_features_by_missingness,
     get_val_runtime_transforms,
     load_splits_and_config,
     RuntimeDataset,
 )
-from src.models.reintervention import ReinterventionRiskModel, get_model
+from src.models.reintervention import ReinterventionRiskModel, get_model, is_classical_backbone
 from src.training.losses import MultiTaskReinterventionLoss, ReinterventionLoss
 from src.training.stages import (
     build_optimizer,
@@ -57,13 +60,16 @@ def validate(
     size: tuple[int, int, int] = (128, 128, 128),
     batch_size: int = 8,
     recall_beta: float = 1.0,
-    threshold_recall_target: float = 0.80,
     disable_cta: bool = False,
+    split: str = "val",
 ) -> tuple[float, dict]:
-    """Evaluate on val split; return (avg_loss, metrics_dict)."""
+    """Evaluate on a data split; return (avg_loss, metrics_dict).
+
+    split controls the metric key prefix ("val" → "val/...", "train" → "train/...").
+    """
     model.eval()
-    with_comp = bool(complications)
-    val_loss  = 0.0
+    with_comp  = bool(complications)
+    total_loss = 0.0
     all_reint_probs, all_reint_gt = [], []
     all_comp_probs, all_comp_gt   = [], []
 
@@ -88,7 +94,7 @@ def validate(
             else:
                 loss, _ = criterion(reint_logit, reint_gt)
 
-            val_loss += loss.item()
+            total_loss += loss.item()
             all_reint_probs.append(torch.sigmoid(reint_logit).cpu())
             all_reint_gt.append(reint_gt.cpu())
 
@@ -103,30 +109,25 @@ def validate(
     best_thresh  = float(t_c[best_idx])
     reint_pred   = (reint_p > best_thresh).astype(int)
 
-    # Recall-targeting threshold: largest t where recall >= threshold_recall_target on val.
-    # More stable than F-beta on small val sets, and transfers better to test.
-    mask = r_c[:-1] >= threshold_recall_target
-    recall_thresh = float(t_c[mask][-1]) if mask.any() else float(t_c[0])
-
     tn, fp, fn, tp = confusion_matrix(reint_g, reint_pred, labels=[0, 1]).ravel()
+    s = split
 
     metrics = {
-        "val/loss_total":        val_loss / len(val_loader),
-        "val/reint_auc":         float(roc_auc_score(reint_g, reint_p)) if len(np.unique(reint_g)) > 1 else 0.5,
-        "val/reint_f1":          float(f1_score(reint_g, reint_pred)),
-        "val/reint_precision":   float(precision_score(reint_g, reint_pred, zero_division=0)),
-        "val/reint_recall":      float(recall_score(reint_g, reint_pred, zero_division=0)),
-        "val/reint_accuracy":    float(accuracy_score(reint_g, reint_pred)),
-        "val/reint_best_fbeta":  float(f_beta[best_idx]),
-        "val/reint_best_thresh": best_thresh,
-        "val/reint_recall_thresh": recall_thresh,
-        "val/recall_beta":       recall_beta,
-        "val/reint_TP": int(tp), "val/reint_FP": int(fp),
-        "val/reint_TN": int(tn), "val/reint_FN": int(fn),
-        "val/reint_TPR": tp / (tp + fn) if (tp + fn) > 0 else 0.0,
-        "val/reint_TNR": tn / (tn + fp) if (tn + fp) > 0 else 0.0,
-        "val/reint_FPR": fp / (fp + tn) if (fp + tn) > 0 else 0.0,
-        "val/reint_FNR": fn / (fn + tp) if (fn + tp) > 0 else 0.0,
+        f"{s}/loss_total":        total_loss / len(val_loader),
+        f"{s}/reint_auc":         float(roc_auc_score(reint_g, reint_p)) if len(np.unique(reint_g)) > 1 else 0.5,
+        f"{s}/reint_f1":          float(f1_score(reint_g, reint_pred)),
+        f"{s}/reint_precision":   float(precision_score(reint_g, reint_pred, zero_division=0)),
+        f"{s}/reint_recall":      float(recall_score(reint_g, reint_pred, zero_division=0)),
+        f"{s}/reint_accuracy":    float(accuracy_score(reint_g, reint_pred)),
+        f"{s}/reint_best_fbeta":  float(f_beta[best_idx]),
+        f"{s}/reint_best_thresh": best_thresh,
+        f"{s}/recall_beta":       recall_beta,
+        f"{s}/reint_TP": int(tp), f"{s}/reint_FP": int(fp),
+        f"{s}/reint_TN": int(tn), f"{s}/reint_FN": int(fn),
+        f"{s}/reint_TPR": tp / (tp + fn) if (tp + fn) > 0 else 0.0,
+        f"{s}/reint_TNR": tn / (tn + fp) if (tn + fp) > 0 else 0.0,
+        f"{s}/reint_FPR": fp / (fp + tn) if (fp + tn) > 0 else 0.0,
+        f"{s}/reint_FNR": fn / (fn + tp) if (fn + tp) > 0 else 0.0,
     }
 
     if with_comp:
@@ -137,24 +138,24 @@ def validate(
             valid = comp_g[:, i] != -1
             if valid.sum() > 0 and len(np.unique(comp_g[valid, i])) > 1:
                 auc = float(roc_auc_score(comp_g[valid, i], comp_p[valid, i]))
-                metrics[f"val/auc_{name}"] = auc
+                metrics[f"{s}/auc_{name}"] = auc
                 aucs.append(auc)
         if aucs:
-            metrics["val/comp_mean_auc"] = float(np.mean(aucs))
+            metrics[f"{s}/comp_mean_auc"] = float(np.mean(aucs))
 
     wandb.log(metrics)
 
     print(
-        f"[VAL] loss={metrics['val/loss_total']:.4f} | "
-        f"auc={metrics['val/reint_auc']:.4f} | "
-        f"acc={metrics['val/reint_accuracy']:.4f} | "
-        f"f1={metrics['val/reint_f1']:.4f} | "
-        f"prec={metrics['val/reint_precision']:.4f} | "
-        f"rec={metrics['val/reint_recall']:.4f} | "
-        f"thresh={metrics['val/reint_best_thresh']:.3f}"
-        + (f" | comp_mAUC={metrics.get('val/comp_mean_auc', 0.0):.4f}" if with_comp else "")
+        f"[{split.upper()}] loss={metrics[f'{s}/loss_total']:.4f} | "
+        f"auc={metrics[f'{s}/reint_auc']:.4f} | "
+        f"acc={metrics[f'{s}/reint_accuracy']:.4f} | "
+        f"f1={metrics[f'{s}/reint_f1']:.4f} | "
+        f"prec={metrics[f'{s}/reint_precision']:.4f} | "
+        f"rec={metrics[f'{s}/reint_recall']:.4f} | "
+        f"thresh={metrics[f'{s}/reint_best_thresh']:.3f}"
+        + (f" | comp_mAUC={metrics.get(f'{s}/comp_mean_auc', 0.0):.4f}" if with_comp else "")
     )
-    return val_loss / len(val_loader), metrics
+    return total_loss / len(val_loader), metrics, (reint_p, reint_g)
 
 
 def log_val_table(
@@ -166,8 +167,12 @@ def log_val_table(
     complications: list[str],
     size: tuple[int, int, int] = (128, 128, 128),
     batch_size: int = 8,
+    split: str = "val",
 ) -> None:
-    """Log a W&B table with per-case predictions (reintervention + complications)."""
+    """Log a W&B table with per-case predictions (reintervention + complications).
+
+    split distinguishes val vs train tables in W&B ("val" or "train").
+    """
     model.eval()
     with_comp = bool(complications)
     columns = ["Epoch", "Case_ID", "Reint_Prob", "Reint_Pred", "Reint_GT", "Label_Type"]
@@ -204,8 +209,8 @@ def log_val_table(
                 table.add_data(*row)
                 case_counter += 1
 
-    wandb.log({f"eval/full_matrix_stage_{stage}": table, "epoch": epoch})
-    print(f"Logged val table: {case_counter} cases.")
+    wandb.log({f"eval/{split}_full_matrix_stage_{stage}": table, "epoch": epoch})
+    print(f"Logged {split} table: {case_counter} cases.")
 
 
 def log_xai_epoch(
@@ -292,6 +297,116 @@ def _log_detailed_metrics(
     wandb.log(log_data)
 
 
+# ── temperature calibration ───────────────────────────────────────────────────
+
+def calibrate_temperature(
+    model: nn.Module,
+    val_loader,
+    ckpt_path: Path,
+    recall_beta: float,
+    size: tuple,
+    batch_size: int,
+    disable_cta: bool = False,
+) -> tuple[float, float]:
+    """Fit a single temperature scalar T on the val set (post-hoc calibration).
+
+    Minimises NLL of sigmoid(logit / T) via LBFGS, then re-searches the
+    F-beta-optimal threshold on calibrated probabilities and writes both back
+    into the checkpoint at ckpt_path.
+
+    Returns (temperature, calibrated_threshold).
+    """
+    from src.models.reintervention import load_checkpoint
+
+    load_checkpoint(get_model(model), ckpt_path, device=DEVICE)
+    model.eval()
+
+    all_logits, all_labels = [], []
+    with torch.no_grad():
+        for batch in val_loader:
+            cta  = batch.get("cta", torch.zeros(batch_size, 4, *size)).to(DEVICE).float()
+            clin = batch["clin"].to(DEVICE).float()
+            aaa  = batch["aaa_metrics"].to(DEVICE).float()
+            gt   = batch["reintervention_label"].to(DEVICE).float()
+            if disable_cta:
+                cta = torch.zeros_like(cta)
+            logit = model(cta, clin, aaa)[0]
+            all_logits.append(logit.cpu())
+            all_labels.append(gt.cpu())
+
+    logits = torch.cat(all_logits).float().flatten()
+    labels = torch.cat(all_labels).float().flatten()
+
+    T_param = nn.Parameter(torch.ones(1))
+    opt_T   = torch.optim.LBFGS([T_param], lr=0.01, max_iter=200, tolerance_grad=1e-7)
+
+    def closure():
+        opt_T.zero_grad()
+        loss = F.binary_cross_entropy_with_logits(
+            logits / T_param.clamp(min=0.01), labels
+        )
+        loss.backward()
+        return loss
+
+    opt_T.step(closure)
+    T = float(T_param.clamp(min=0.01).item())
+
+    # Re-search F-beta threshold on calibrated probabilities
+    probs  = torch.sigmoid(logits / T).detach().numpy()
+    labels_np = labels.numpy().astype(int)
+    p_c, r_c, t_c = precision_recall_curve(labels_np, probs)
+    b2     = recall_beta ** 2
+    f_beta = (1 + b2) * p_c[:-1] * r_c[:-1] / (b2 * p_c[:-1] + r_c[:-1] + 1e-8)
+    thresh = float(t_c[int(np.argmax(f_beta))])
+
+    ckpt = torch.load(ckpt_path, map_location="cpu")
+    ckpt["temperature"] = T
+    ckpt["threshold"]   = thresh
+    torch.save(ckpt, ckpt_path)
+
+    return T, thresh
+
+
+# ── classical backbone helpers ────────────────────────────────────────────────
+
+def fit_classical_backbone(
+    model: nn.Module,
+    train_ids: list[str],
+    config: dict,
+    feature_names: list[str],
+    clin_mean: np.ndarray,
+    clin_std: np.ndarray,
+) -> None:
+    """Fit the sklearn model inside ClassicalBranchWrapper on the training split.
+
+    Features are z-normalised (clinical) and left raw (AAA) to exactly match
+    what the DataLoader delivers to the model at runtime.
+    """
+    from src.data.loaders import build_tabular_arrays
+    from src.models.baselines import ClassicalBranchWrapper
+
+    branch = get_model(model).clinical_branch
+    if not isinstance(branch, ClassicalBranchWrapper):
+        return
+
+    X_raw, y, _ = build_tabular_arrays(train_ids, config, feature_names)
+
+    # Apply the same normalisation as NormalizeClinicald: z-score then nan→0
+    n_clin = len(feature_names)
+    X_clin = (X_raw[:, :n_clin] - clin_mean) / (clin_std + 1e-8)
+    X_clin = np.where(np.isnan(X_clin), 0.0, X_clin)
+    X_aaa  = X_raw[:, n_clin:]                      # raw AAA scalars (no z-norm)
+    X      = np.concatenate([X_clin, X_aaa], axis=1)
+
+    n_pos = int(y.sum())
+    print(
+        f"  Fitting {branch.model_type.upper()} on {len(y)} train samples "
+        f"(pos={n_pos}, neg={len(y)-n_pos})"
+    )
+    branch.fit(X, y)
+    print(f"  Classical backbone fitted and ready.")
+
+
 # ── main pipeline ─────────────────────────────────────────────────────────────
 
 def run_pipeline(cfg: dict) -> None:
@@ -317,8 +432,12 @@ def run_pipeline(cfg: dict) -> None:
 
     # ── data ─────────────────────────────────────────────────────────────────
     splits, config, feature_names = load_splits_and_config(base_dir)
+    max_missing_pct = cfg["training"].get("max_missing_pct", 1.0)
+    feature_names   = filter_features_by_missingness(
+        splits["train"], config, feature_names, max_missing_pct
+    )
     clin_mean, clin_std = compute_clin_stats(splits["train"], config, feature_names)
-    print(f"Clinical features : {len(feature_names)}")
+    print(f"Clinical features : {len(feature_names)}  (max_missing_pct={max_missing_pct})")
 
     train_loader, val_loader = build_loaders(
         splits, config, feature_names, clin_mean, clin_std,
@@ -349,7 +468,7 @@ def run_pipeline(cfg: dict) -> None:
         aaa_dim=cfg["model"].get("aaa_dim", 5),
         complications=complications,
         clinical_backbone=cfg["model"].get("clinical_backbone", "mlp"),
-        tabm_cfg=cfg["model"].get("tabm") or {},
+        tabm_cfg=cfg["model"].get("backbone_cfg") or cfg["model"].get("tabm") or {},
     ).to(DEVICE)
 
     if torch.cuda.device_count() > 1:
@@ -384,9 +503,15 @@ def run_pipeline(cfg: dict) -> None:
     xai_every    = cfg["training"].get("xai_every_n_epochs", 10)
     xai_samples  = cfg["training"].get("xai_samples", 4)
     xai_gradcam  = cfg["training"].get("xai_gradcam", False)
-    recall_beta             = cfg["training"].get("recall_beta", 1.0)
-    threshold_recall_target = cfg["training"].get("threshold_recall_target", 0.80)
-    disable_cta             = cfg["training"].get("disable_cta", False)
+    recall_beta  = cfg["training"].get("recall_beta", 1.0)
+    disable_cta  = cfg["training"].get("disable_cta", False)
+
+    # ── classical backbone: fit sklearn model once before any stage ───────────
+    if is_classical_backbone(model):
+        print("\n>>> FITTING CLASSICAL BACKBONE")
+        fit_classical_backbone(
+            model, splits["train"], config, feature_names, clin_mean, clin_std
+        )
 
     # ── stage loop ────────────────────────────────────────────────────────────
     for stage_cfg in cfg["training"]["stages"]:
@@ -457,7 +582,9 @@ def run_pipeline(cfg: dict) -> None:
                         loss, last_loss_dict = criterion(reint_logit, reint_gt)
 
                     # L1 on feature gate → sparse feature selection
-                    loss = loss + gate_l1_w * torch.sigmoid(get_model(model).feature_gate).sum()
+                    # (skipped for classical backbones: gate has no gradient path)
+                    if not is_classical_backbone(model):
+                        loss = loss + gate_l1_w * torch.sigmoid(get_model(model).feature_gate).sum()
 
                 scaler.scale(loss).backward()
                 scaler.unscale_(opt)
@@ -467,27 +594,39 @@ def run_pipeline(cfg: dict) -> None:
                 train_loss += loss.item()
                 pbar.set_postfix(loss=f"{loss.item():.3f}", avg=f"{train_loss/(i+1):.3f}")
 
-            val_loss, val_metrics = validate(
+            val_loss, val_metrics, _ = validate(
                 model, val_loader, criterion, complications, size, batch_size,
                 recall_beta=recall_beta,
-                threshold_recall_target=threshold_recall_target,
                 disable_cta=disable_cta,
+                split="val",
+            )
+            _, train_metrics, _ = validate(
+                model, train_loader, criterion, complications, size, batch_size,
+                recall_beta=recall_beta,
+                disable_cta=disable_cta,
+                split="train",
             )
             _log_detailed_metrics(st, epoch, train_loss / len(train_loader),
                                    val_loss, last_loss_dict, opt)
             scheduler.step()
             tqdm.write(
                 f"[Stage {st} | Epoch {epoch:03d}]  "
-                f"train={train_loss/len(train_loader):.4f}  val={val_loss:.4f}  "
-                f"auc={val_metrics.get('val/reint_auc', 0):.4f}  "
-                f"f{recall_beta:.0f}={val_metrics.get('val/reint_best_fbeta', 0):.4f}"
+                f"train_loss={train_loss/len(train_loader):.4f}  val_loss={val_loss:.4f}  "
+                f"train_auc={train_metrics.get('train/reint_auc', 0):.4f}  "
+                f"val_auc={val_metrics.get('val/reint_auc', 0):.4f}  "
+                f"val_f{recall_beta:.0f}={val_metrics.get('val/reint_best_fbeta', 0):.4f}"
             )
 
             if (epoch + 1) % 3 == 0:
                 log_val_table(
                     model, val_loader, epoch, st,
                     val_metrics.get("val/reint_best_thresh", 0.5),
-                    complications, size, batch_size,
+                    complications, size, batch_size, split="val",
+                )
+                log_val_table(
+                    model, train_loader, epoch, st,
+                    train_metrics.get("train/reint_best_thresh", 0.5),
+                    complications, size, batch_size, split="train",
                 )
 
             if (epoch + 1) % xai_every == 0:
@@ -505,20 +644,23 @@ def run_pipeline(cfg: dict) -> None:
             if val_fbeta > best_val_fbeta:
                 best_val_fbeta   = val_fbeta
                 patience_counter = 0
-                torch.save(
-                    {
-                        "state_dict":    get_model(model).state_dict(),
-                        "threshold":     val_metrics.get("val/reint_best_thresh", 0.5),
-                        "feature_names": feature_names,
-                        "clin_mean":     clin_mean.tolist(),
-                        "clin_std":      clin_std.tolist(),
-                        "complications":      complications,
-                        "clinical_backbone":  cfg["model"].get("clinical_backbone", "mlp"),
-                        "tabm_cfg":           cfg["model"].get("tabm") or {},
-                        "config":             cfg,
-                    },
-                    checkpoint_dir / f"best_stage_{st.lower()}.pt",
-                )
+                ckpt_dict = {
+                    "state_dict":    get_model(model).state_dict(),
+                    "threshold":     val_metrics.get("val/reint_best_thresh", 0.5),
+                    "feature_names": feature_names,
+                    "clin_mean":     clin_mean.tolist(),
+                    "clin_std":      clin_std.tolist(),
+                    "complications":      complications,
+                    "clinical_backbone":  cfg["model"].get("clinical_backbone", "mlp"),
+                    "tabm_cfg":           cfg["model"].get("backbone_cfg") or cfg["model"].get("tabm") or {},
+                    "config":             cfg,
+                }
+                if is_classical_backbone(model):
+                    from src.models.baselines import ClassicalBranchWrapper
+                    ckpt_dict["classical_baseline_bytes"] = (
+                        get_model(model).clinical_branch.serialize()
+                    )
+                torch.save(ckpt_dict, checkpoint_dir / f"best_stage_{st.lower()}.pt")
                 print(
                     f"  ✓ Checkpoint saved "
                     f"(F{recall_beta:.0f}={best_val_fbeta:.4f}, "
@@ -534,5 +676,52 @@ def run_pipeline(cfg: dict) -> None:
                         f"(best F{recall_beta:.0f}={best_val_fbeta:.4f})"
                     )
                     break
+
+        # ── ROC curves for this stage (best checkpoint, val + train) ─────────
+        import matplotlib.pyplot as plt
+        from src.models.reintervention import load_checkpoint as _lc
+        best_ckpt = checkpoint_dir / f"best_stage_{st.lower()}.pt"
+        if best_ckpt.exists():
+            _lc(get_model(model), best_ckpt, device=DEVICE)
+            _, roc_metrics, (rp, rg) = validate(
+                model, val_loader, criterion, complications, size, batch_size,
+                recall_beta=recall_beta, disable_cta=disable_cta, split="val",
+            )
+            thresh = float(roc_metrics.get("val/reint_best_thresh", 0.5))
+            fig = plot_roc_curve(
+                rp.tolist(), rg.tolist(),
+                title=f"Stage {st} — Val ROC (best checkpoint)",
+                threshold=thresh,
+            )
+            wandb.log({f"roc/val_stage_{st}": wandb.Image(fig)})
+            plt.close(fig)
+            print(f"  Val ROC curve logged to W&B (roc/val_stage_{st})")
+
+            _, train_roc_metrics, (trp, trg) = validate(
+                model, train_loader, criterion, complications, size, batch_size,
+                recall_beta=recall_beta, disable_cta=disable_cta, split="train",
+            )
+            train_thresh = float(train_roc_metrics.get("train/reint_best_thresh", 0.5))
+            fig_train = plot_roc_curve(
+                trp.tolist(), trg.tolist(),
+                title=f"Stage {st} — Train ROC (best checkpoint)",
+                threshold=train_thresh,
+            )
+            wandb.log({f"roc/train_stage_{st}": wandb.Image(fig_train)})
+            plt.close(fig_train)
+            print(f"  Train ROC curve logged to W&B (roc/train_stage_{st})")
+
+    # ── temperature calibration (post-hoc, after all stages) ─────────────────
+    final_ckpt = checkpoint_dir / "best_stage_b.pt"
+    if final_ckpt.exists():
+        print("\n>>> TEMPERATURE CALIBRATION")
+        T, cal_thresh = calibrate_temperature(
+            model, val_loader, final_ckpt,
+            recall_beta=recall_beta,
+            size=size, batch_size=batch_size,
+            disable_cta=disable_cta,
+        )
+        print(f"  T={T:.4f}  calibrated threshold={cal_thresh:.4f}")
+        wandb.log({"calibration/temperature": T, "calibration/threshold": cal_thresh})
 
     wandb.finish()

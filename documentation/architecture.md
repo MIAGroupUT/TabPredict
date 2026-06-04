@@ -10,10 +10,11 @@ CTA volume (4-ch, 224×224×160)
     → Merlin I3ResNet (frozen, BN adapted in Stage B)
     → visual_proj (Linear 2048→256)           → 256-dim visual embedding ─────┐
                                                                               │
-Clinical tabular (~744 features, z-normalised)                                │
-    → feature_gate (per-feature sigmoid)                                      │
+Clinical tabular (~42 features, z-normalised, filtered from 240 raw)         │
+    → feature_gate (per-feature sigmoid) [DL backbones only]                 │
     → cat with AAA geometry (5 scalars, no gate)                              │
-    → clinical_branch (MLP or TabM → 32-dim)  → 32-dim tabular embedding ─────┘
+    → clinical_branch (MLP | TabM | LR | RF | GBM | XGBoost → 32-dim)       │
+                                          → 32-dim tabular embedding ─────────┘
                                                         │
                                           cat → 288-dim fused representation
                                                         │
@@ -48,10 +49,12 @@ The 4-channel CTA input concatenates: CT intensity · lumen segmentation mask ·
 |---|---|
 | `feature_gate` | Learnable `nn.Parameter` of shape `(clinical_dim,)`, passed through sigmoid at forward time. Gates each clinical feature independently. L1-regularised to encourage sparsity. |
 | AAA append | The 5 AAA geometry scalars are concatenated to the gated clinical vector **after** gating, giving an input of `(clinical_dim + 5)` to the branch. They bypass the L1 gate since they are imaging-derived and always informative. |
-| `clinical_branch` | Configurable backbone outputting **(B, 32)**. Input dim = `clinical_dim + aaa_dim`. Default: MLP (`Linear(749→128)→LN→ReLU→Dropout(0.3)→Linear(128→32)→Dropout(0.2)`). Alternative: **TabM** (see below). |
-| Input | z-normalised clinical feature vector (~744 features from RADAR) + 5 AAA geometry scalars |
+| `clinical_branch` | Configurable backbone outputting **(B, 32)**. Input dim = `clinical_dim + aaa_dim`. Options: **MLP** (default), **TabM**, or a **classical ML wrapper** (LR / RF / GBM / XGBoost — see below). |
+| Input | z-normalised clinical feature vector (~42 features, after missingness filter) + 5 AAA geometry scalars |
 
-The feature gate multiplies the normalised clinical input elementwise before appending the AAA scalars. Clinical features with gate values near zero are effectively suppressed while the geometry scalars remain unaffected. The L1 penalty (`gate_l1_weight`, default 0.0005) encourages sparsity while preserving signal from the 63 training positives.
+**Clinical feature filtering:** of the 240 raw RADAR `pre_op_features` fields, 198 (82%) are missing in ≥50% of training patients — these are imputed to the training mean, making them indistinguishable from an "average" patient and giving the gate only noise to work with. `filter_features_by_missingness()` (`src/data/loaders.py`) drops these at training time using the training split only (no leakage), reducing the input to ~42 genuinely informative features. The filtered `feature_names` list is saved in the checkpoint, so inference automatically uses the same subset.
+
+The feature gate multiplies the normalised clinical input elementwise before appending the AAA scalars. Clinical features with gate values near zero are effectively suppressed while the geometry scalars remain unaffected. The L1 penalty (`gate_l1_weight`, default 0.0001) encourages selective sparsity over the ~42 filtered features.
 
 **Why merge AAA scalars into the tabular branch?** A dedicated two-layer MLP for just 5 inputs (`Linear(5,32)→Linear(32,32)`) was heavily overparameterised (~1,200 params for 5 features) and gave the 5 scalars the same 32-dim "vote" in the fused representation as the 744-feature clinical branch. Appending them after gating shares the encoder capacity fairly and reduces the fusion dimension from 320 to 288, while keeping their signal intact (they bypass sparsity pressure via the gate).
 
@@ -73,14 +76,14 @@ avg_lumen_to_wall_dist_mm
 
 ```yaml
 model:
-  clinical_backbone: tabm   # mlp (default) | tabm
-  tabm:
+  clinical_backbone: tabm   # mlp (default) | tabm | lr | rf | gbm | xgboost
+  backbone_cfg:
     k: 16                   # ensemble members
     n_blocks: 2             # MLP depth per member
-    d_block: 128            # hidden width per member
+    d_block: 64             # hidden width per member (halved from 128; ~4k params/positive)
     dropout: 0.3
     num_embeddings: periodic  # periodic (default) | none
-    d_embedding: 16           # embedding dim per feature (periodic only)
+    d_embedding: 8            # embedding dim per feature (halved from 16 to match d_block)
 ```
 
 To benchmark without editing the YAML:
@@ -88,6 +91,29 @@ To benchmark without editing the YAML:
 python scripts/train.py --config experiments/v1_no_complications.yaml \
     --set model.clinical_backbone=tabm
 ```
+
+#### Classical ML backbones (LR / RF / GBM / XGBoost)
+
+`clinical_backbone: lr | rf | gbm | xgboost` wraps a scikit-learn (or XGBoost) classifier inside `ClassicalBranchWrapper(nn.Module)` — a hybrid that combines a non-differentiable sklearn model with a learnable `Linear(1→32)` projection.
+
+**How it works:**
+
+1. Before Stage A, `fit_classical_backbone()` fits the sklearn model once on z-normalised clinical + raw AAA features from the training split (identical distribution to runtime inference).
+2. During forward: the sklearn model's `predict_proba` output (a single scalar per patient) is projected to 32-dim via `Linear(1→32)`, giving a differentiable path into the FiLM fusion.
+3. The visual branch, FiLM layer, and prediction head all train normally via backprop in both stages. The `feature_gate` is bypassed (classical models handle feature importance internally).
+4. Checkpoints include `classical_baseline_bytes` — a joblib-serialised copy of the fitted sklearn pipeline — loaded automatically by `load_checkpoint()`.
+
+This design means **CTA information is fully utilised** alongside the classical tabular model, unlike a pure tabular baseline. The classical backbone is a direct drop-in replacement for MLP/TabM — no code changes needed, just swap the YAML key.
+
+```yaml
+model:
+  clinical_backbone: rf     # lr | rf | gbm | xgboost
+  backbone_cfg:
+    n_estimators: 300
+    min_samples_leaf: 2
+```
+
+Dedicated configs: `experiments/v1_logistic_regression.yaml`, `v1_random_forest.yaml`, `v1_gradient_boosting.yaml`, `v1_xgboost.yaml`.
 
 ---
 
@@ -138,23 +164,24 @@ migration, infection
 from src.models.reintervention import ReinterventionRiskModel
 
 # Primary-task model (default MLP clinical backbone)
-model = ReinterventionRiskModel(clinical_dim=744, aaa_dim=5, complications=[])
+# clinical_dim is derived from feature_names after missingness filtering (~42)
+model = ReinterventionRiskModel(clinical_dim=42, aaa_dim=5, complications=[])
 (logit,) = model(cta, clin, aaa)
 # logit: (B, 1) — reintervention logit
 # Internally: cat([clin * sigmoid(gate), aaa]) → clinical_branch → 32-dim
 
 # Primary-task model with TabM clinical backbone
 model = ReinterventionRiskModel(
-    clinical_dim=744, aaa_dim=5, complications=[],
+    clinical_dim=42, aaa_dim=5, complications=[],
     clinical_backbone="tabm",
-    tabm_cfg=dict(k=16, n_blocks=2, d_block=128, dropout=0.3,
-                  num_embeddings="periodic", d_embedding=16),
+    tabm_cfg=dict(k=16, n_blocks=2, d_block=64, dropout=0.3,
+                  num_embeddings="periodic", d_embedding=8),
 )
 (logit,) = model(cta, clin, aaa)
 
 # Multi-task model
 model = ReinterventionRiskModel(
-    clinical_dim=744, aaa_dim=5,
+    clinical_dim=42, aaa_dim=5,
     complications=["endoleak_1a", "endoleak_1b", "migration", ...],
 )
 logit, comp_logits = model(cta, clin, aaa)
@@ -173,10 +200,10 @@ fused = model(cta, clin, aaa, return_fused=True)   # (B, 288)
 | Merlin I3ResNet backbone | Pretrained on 110k CT scans; strong 3D medical imaging priors without training from scratch |
 | BN-only adaptation (layer3/4) | Recalibrates feature statistics per scanner type with ~50 K params; avoids catastrophic forgetting while correcting scanner-domain bias |
 | FiLM clamped to ±0.3 | Allows meaningful cross-modal modulation (±30%) while staying stable during training |
-| Per-feature sigmoid gate (L1-regularised) | Soft feature selection over ~744 clinical features; interpretable — gate values can be inspected post-training |
+| Per-feature sigmoid gate (L1-regularised) | Soft feature selection over ~42 clinical features (pre-filtered from 240 by missingness); interpretable — gate values can be inspected post-training |
 | AAA scalars appended after gate | 5 imaging-derived geometry scalars bypass the sparsity gate (they are always informative) but share the clinical MLP/TabM encoder, avoiding the overparameterisation of a dedicated 5→32→32 branch |
 | Plain focal BCE (no log-variance) | Simpler and equally effective; confidence is derived from `2×\|prob−0.5\|` which is self-calibrating without post-hoc tuning |
-| Configurable clinical backbone (MLP / TabM) | MLP is the proven default; TabM (parameter-efficient ensemble) can be swapped in via a single YAML key to benchmark stronger tabular DL |
+| Configurable clinical backbone | MLP is the proven default; TabM (parameter-efficient ensemble) or classical ML (LR / RF / GBM / XGBoost) can be swapped in via a single YAML key. Classical backbones use `ClassicalBranchWrapper` — a fitted sklearn model + learnable projection — so the visual branch still trains and CTA information is preserved |
 | F-beta (β=2) threshold | Weights recall 4× over precision — missing a reintervention is clinically worse than a false alarm |
 | Causal modality dropout | Encodes clinical constraint (AAA metrics cannot exist without CTA); forces all branches to develop independent representations |
 
@@ -185,15 +212,20 @@ fused = model(cta, clin, aaa, return_fused=True)   # (B, 288)
 ## Helper Functions
 
 ```python
-from src.models.reintervention import get_model, load_checkpoint, disable_checkpointing
+from src.models.reintervention import get_model, load_checkpoint, disable_checkpointing, is_classical_backbone
 
 # Unwrap DataParallel safely
 model = get_model(model_or_wrapped)
 
-# Load a checkpoint; strips "module." prefix from DataParallel checkpoints
+# Load a checkpoint; strips "module." prefix from DataParallel checkpoints.
+# Also restores classical_baseline_bytes (fitted sklearn model) when present.
 ckpt = load_checkpoint(model, path, device="cuda", strict=True)
 threshold   = ckpt["threshold"]
 feat_names  = ckpt["feature_names"]
+
+# Check backbone type
+if is_classical_backbone(model):
+    print("Using classical ML tabular backbone")
 
 # Disable gradient checkpointing (required before XAI gradient computation)
 disable_checkpointing(model)

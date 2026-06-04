@@ -104,7 +104,9 @@ Imputing to z=0 (the training mean) is the most agnostic choice: the feature car
 
 **Statistics are computed on observed values only** (`np.nanmean` / `np.nanstd`). Features that are 100% missing in the training split receive `mean=0, std=1` so they always normalise to z=0 and add no gradient.
 
-Of the 241 raw features, 99 are 100% missing in training, 155 are >80% missing. Only ~25 features have <30% missing and carry real clinical signal (age, BMI, ASA score, smoking history, AAA diameter, cardiac/renal comorbidities, vascular anatomy flags).
+Of the 240 raw features (after dropping `PatientNr`), 198 (82%) are ≥50% missing and 148 (62%) are ≥90% missing in training patients. Only **42 features have <50% missingness** and carry real clinical signal (age, BMI, ASA score, smoking history, AAA diameter, cardiac/renal comorbidities, vascular anatomy flags).
+
+**Missingness filter:** `filter_features_by_missingness()` (`src/data/loaders.py`) is called during training to drop features above the configured threshold before `compute_clin_stats` runs. This is controlled by `training.max_missing_pct` in the YAML (default 0.5). The filter is computed on the training split only. The resulting `feature_names` list (~42 entries) is stored in the checkpoint, so inference automatically uses the same subset — no YAML changes needed at test time.
 
 ### Ground Truth Notes
 

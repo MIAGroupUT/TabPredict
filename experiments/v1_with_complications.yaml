@@ -43,8 +43,8 @@ model:
     - migration
     - infection
   aaa_dim: 5
-  clinical_backbone: mlp        # mlp | tabm
-  tabm:                         # only used when clinical_backbone: tabm
+  clinical_backbone: tabm        # mlp | tabm | lr | rf | gbm | xgboost
+  backbone_cfg:                 # hyperparameters forwarded to the chosen backbone
     k: 16                       # ensemble members (paper default 32; 16 for small data)
     n_blocks: 2
     d_block: 64                 # was 128; halved to ~4k params/positive (was 10k — too many for 63 positives)
@@ -66,9 +66,9 @@ training:
   focal_gamma: 2.0
   label_smoothing: 0.02
   pos_weight: 1.0            # WRS already balances batches 50/50; raw ratio (314/63=4.98) must NOT be used
-  gate_l1_weight: 0.0005     # gentle sparsity; 63 train positives → keep conservative
+  max_missing_pct: 0.5       # drop clinical features missing in ≥50% of train patients
+  gate_l1_weight: 0.0001     # reduced: gate now operates on ~42 informative features, not 240
   recall_beta: 2.0           # checkpoint saved by F2-score (recall-weighted)
-  threshold_recall_target: 0.80  # threshold saved = smallest t giving ≥80% recall on val
 
   comp_weight_stage_a: 0.01  # near-zero in Stage A so reintervention head warms up cleanly
   comp_weight_stage_b: 0.3
@@ -118,9 +118,9 @@ training:
 
 paths:
   base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_with_complications_MLP_03062026
+  checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_with_complications_TabM_03062026
 
 wandb:
   project: AAA-Reintervention-Risk
-  run_name: v1_with_complications_mlp
+  run_name: v1_with_complications_tabm
   mode: online

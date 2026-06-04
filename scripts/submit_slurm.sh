@@ -11,7 +11,13 @@
 #     sbatch --job-name=v1_comp     scripts/submit_slurm.sh train \
 #         --config experiments/v1_with_complications.yaml
 #
-#   Testing (add --gradcam for GradCAM PNGs):
+#   Testing — all stage checkpoints automatically (stage_a + stage_b):
+#     sbatch --job-name=test_no_comp scripts/submit_slurm.sh test \
+#         --config     experiments/v1_no_complications.yaml \
+#         --output_dir /home/ranema/AI4EVAR/test_results/v1_no_complications \
+#         --gradcam
+#
+#   Testing — single checkpoint only:
 #     sbatch --job-name=test_no_comp scripts/submit_slurm.sh test \
 #         --config     experiments/v1_no_complications.yaml \
 #         --checkpoint /home/ranema/AI4EVAR/checkpoints/v1_no_complications/best_stage_b.pt \

@@ -43,10 +43,12 @@ class ReinterventionXAI:
         model: nn.Module,
         feature_names: list[str],
         complications: list[str] | None = None,
+        temperature: float = 1.0,
     ) -> None:
         self.model         = model
         self.feature_names = np.array(feature_names)
         self.complications = list(complications or [])
+        self.temperature   = max(temperature, 0.01)
 
     # ── public API ────────────────────────────────────────────────────────────
 
@@ -66,7 +68,7 @@ class ReinterventionXAI:
             outputs = self.model(cta, clin, aaa)
 
         reint_logit = outputs[0]
-        reint_prob  = float(torch.sigmoid(reint_logit).item())
+        reint_prob  = float(torch.sigmoid(reint_logit / self.temperature).item())
         # Confidence = distance from 0.5: 0 when maximally uncertain, 1 when certain.
         reint_conf  = 2.0 * abs(reint_prob - 0.5)
 
@@ -77,7 +79,7 @@ class ReinterventionXAI:
         }
 
         if self.complications:
-            comp_probs_t = torch.sigmoid(outputs[1]).squeeze().cpu().numpy()
+            comp_probs_t = torch.sigmoid(outputs[1] / self.temperature).squeeze().cpu().numpy()
             comp_prob_dict, comp_conf_dict = {}, {}
             for i, name in enumerate(self.complications):
                 p = float(comp_probs_t[i] if comp_probs_t.ndim > 0 else comp_probs_t)
@@ -204,12 +206,12 @@ class ReinterventionXAI:
         if clin_var.grad is None:
             return []
         grads = clin_var.grad.abs().squeeze().cpu().numpy()
-        top   = np.argsort(grads)[::-1][:20]
+        grads_norm = grads / (grads.max() + 1e-8)
+        top   = np.argsort(grads_norm)[::-1][:20]
         result = []
         for idx in top:
-            s   = float(grads[idx])
-            pct = float((grads >= s).mean())
-            level = "HIGH" if pct > 0.9 else ("MED" if pct > 0.7 else "LOW")
+            s     = float(grads_norm[idx])
+            level = "HIGH" if s > 0.7 else ("MED" if s > 0.3 else "LOW")
             result.append((str(self.feature_names[idx]), round(s, 4), level))
         return result
 

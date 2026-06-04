@@ -1,11 +1,15 @@
 # Configuration Reference
 
-Experiments are defined by YAML files in `experiments/`. There are two variants:
+Experiments are defined by YAML files in `experiments/`. All share the same 2-stage training pipeline and `train.py`/`test.py` entry points.
 
-| File | Model |
-|---|---|
-| `v1_no_complications.yaml` | Reintervention prediction only (primary task) |
-| `v1_with_complications.yaml` | Reintervention + 7 complication heads (multi-task) |
+| File | Backbone | Task |
+|---|---|---|
+| `v1_no_complications.yaml` | MLP | Reintervention prediction only |
+| `v1_with_complications.yaml` | TabM | Reintervention + 7 complication heads |
+| `v1_logistic_regression.yaml` | Logistic Regression | Reintervention prediction only |
+| `v1_random_forest.yaml` | Random Forest | Reintervention prediction only |
+| `v1_gradient_boosting.yaml` | Gradient Boosting | Reintervention prediction only |
+| `v1_xgboost.yaml` | XGBoost | Reintervention prediction only |
 
 ---
 
@@ -23,17 +27,22 @@ model:
                               # ["endoleak_1a","endoleak_1b","endoleak_2","endoleak_3",
                               #  "endoleak_5","migration","infection"]
   aaa_dim: 5                  # number of AAA geometry metrics (do not change)
-  clinical_backbone: mlp      # mlp (default) | tabm
-  tabm:                       # only used when clinical_backbone: tabm
+  clinical_backbone: mlp      # mlp (default) | tabm | lr | rf | gbm | xgboost
+  backbone_cfg:               # hyperparameters forwarded to the chosen backbone
+    # ── TabM fields (ignored for other backbones) ──────────────────────────
     k: 16                     # ensemble members (paper default 32; 16 for small data)
     n_blocks: 2               # MLP depth per ensemble member
-    d_block: 128              # hidden width per member
+    d_block: 64               # hidden width per member (halved from 128; ~4k params/positive)
     dropout: 0.3              # dropout inside each block
     num_embeddings: periodic  # periodic (default) | none
                               # periodic = PeriodicEmbeddings(lite=True): shared sinusoidal
                               # frequencies across all features; 48 params vs ~35 K for
                               # per-feature (lite=False) — right choice for 377 training samples
-    d_embedding: 16           # embedding dim per feature (only when num_embeddings: periodic)
+    d_embedding: 8            # embedding dim per feature (halved from 16 to match d_block)
+    # ── Classical ML fields (for lr | rf | gbm | xgboost) ─────────────────
+    # Use the sklearn/XGBoost constructor kwargs for the chosen backbone.
+    # Examples: C, max_iter (LR); n_estimators, max_depth (RF/GBM/XGBoost).
+    # scale_pos_weight is set automatically for XGBoost from training class counts.
 
 # ── Training ──────────────────────────────────────────────────────────────────
 training:
@@ -50,12 +59,15 @@ training:
   pos_weight: 1.0             # BCE positive class weight; WeightedRandomSampler already
                               # balances batches 50/50, so pos_weight=1.0 avoids double-correction.
                               # Increase (e.g. to N_neg/N_pos) only if sampler is disabled.
-  gate_l1_weight: 0.0005      # L1 regularisation weight on feature gate
+  max_missing_pct: 0.5        # drop clinical features missing in ≥ this fraction of train patients
+                              # reduces 240 raw features to ~42 genuinely informative ones;
+                              # computed on train split only (no leakage); stored in checkpoint
+  gate_l1_weight: 0.0001      # L1 regularisation weight on feature gate
+                              # kept low since gate now operates on ~42 filtered features, not 240
 
   # Threshold selection
   recall_beta: 2.0            # β for F-beta threshold search over PR curve
-                              # β > 1 → recall weighted more than precision
-  threshold_recall_target: 0.80  # hard floor: saved threshold is the smallest t giving ≥80% recall on val
+                              # β=2 → recall weighted 4× over precision (F2-score)
 
   # Modality dropout (applied in both Stage A and Stage B training)
   modality_dropout:

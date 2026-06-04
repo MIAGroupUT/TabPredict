@@ -1,0 +1,71 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Experiment: v1_gradient_boosting
+#   Gradient Boosting Machine as the tabular backbone (replaces MLP/TabM).
+#   Same hybrid pipeline as v1_logistic_regression/v1_random_forest.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: v1_gradient_boosting
+version: 1
+description: >
+  Gradient Boosting Machine tabular backbone + frozen/adapted Merlin visual branch.
+  Baseline comparison for v1_no_complications (MLP) and v1_with_complications (TabM).
+
+model:
+  with_complications: false
+  complications: []
+  aaa_dim: 5
+  clinical_backbone: gbm
+  backbone_cfg:
+    n_estimators: 300
+    learning_rate: 0.05
+    max_depth: 3
+    subsample: 0.8
+    max_features: 0.8
+    min_samples_leaf: 3
+
+training:
+  seed: 3299
+  batch_size: 8
+  num_workers: 4
+  image_size: [224, 224, 160]
+  voxel_spacing: [1.5, 1.5, 3]
+  hu_range: [-1000, 1000]
+  train_cache_rate: 0.5
+  val_cache_rate: 1.0
+
+  focal_gamma: 2.0
+  label_smoothing: 0.02
+  pos_weight: 1.0
+  max_missing_pct: 0.5
+  gate_l1_weight: 0.0
+  recall_beta: 2.0
+
+  modality_dropout:
+    p_cta: 0.0
+    p_aaa_given_cta: 0.15
+    p_aaa_given_clin: 0.15
+    p_clinical: 0.0
+
+  xai_every_n_epochs: 999
+  xai_samples: 4
+  xai_gradcam: false
+
+  stages:
+    - name: A
+      epochs: 60
+      patience: 15
+      T_0: 20
+
+    - name: B
+      epochs: 100
+      patience: 20
+      T_0: 30
+
+paths:
+  base_dir:       /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
+  checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_gradient_boosting
+
+wandb:
+  project:  AAA-Reintervention-Risk
+  run_name: v1_gradient_boosting
+  mode:     online
