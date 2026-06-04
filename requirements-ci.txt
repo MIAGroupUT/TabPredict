@@ -17,3 +17,4 @@ tabm==0.0.3
 rtdl_num_embeddings==0.0.12
 pytest==9.0.3
 pytest-cov==6.0.0
+xgboost==3.2.0

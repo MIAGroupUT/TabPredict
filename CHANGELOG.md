@@ -9,6 +9,12 @@ Entries are grouped by push milestone (no formal version tags yet).
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+---
+
+## [2026-06-04] — Classical LR backbones; train metrics; multi-split eval; XAI fix; config renames
+
 ### Added
 
 - **Classical ML tabular backbones** — `src/models/baselines.py` adds `TabularBaseline` (standalone sklearn Pipeline wrapper for LR / RF / GBM / XGBoost) and `ClassicalBranchWrapper(nn.Module)` (fits a `TabularBaseline` and projects its scalar `predict_proba` output to 32-dim via a learnable `Linear(1→32)`, enabling gradient flow into the FiLM fusion and visual branch). Set `clinical_backbone: lr | rf | gbm | xgboost` in any experiment YAML to use — the visual branch and all downstream fusion parameters continue to train normally via backprop.
@@ -23,6 +29,7 @@ Entries are grouped by push milestone (no formal version tags yet).
 - **`roc_curve.png`** saved to output directory by `run_test()` for every evaluation run.
 - **`filter_features_by_missingness()`** in `src/data/loaders.py` — drops clinical features missing in ≥ `max_missing_pct` of training patients before stats are computed. 198/240 features (82%) are ≥50% missing; after filtering the input reduces to ~42 informative features. Computed on training split only (no leakage); `feature_names` list saved in checkpoint.
 - **`max_missing_pct: 0.5`** config key under `training:` in both DL experiment YAMLs.
+- **`xgboost==3.2.0`** added to `requirements.txt` and `requirements-ci.txt`.
 - **41 tests in `tests/test_baselines.py`** covering `TabularBaseline` (shape, NaN handling, save/load, predict-before-fit guard), `ClassicalBranchWrapper` (zeros before fit, forward shape/no-NaN after fit, gradients through projection layer, serialize/deserialize), `is_classical_backbone`, and `fit_classical_backbone` integration. Total suite: 353 tests.
 
 ### Fixed
