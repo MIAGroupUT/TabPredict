@@ -290,47 +290,4 @@ def test_fit_classical_backbone_forward_no_zeros(model_type):
     assert not torch.all(out == 0)
 
 
-# ── TabPFN backbone — structural tests (no fitting; weights download is slow) ─
-
-def test_tabpfn_in_classical_backbones():
-    from src.models.baselines import CLASSICAL_BACKBONES
-    assert "tabpfn" in CLASSICAL_BACKBONES
-
-
-def test_tabpfn_not_in_available():
-    """AVAILABLE is the sklearn-only list used for TabularBaseline parametrisation."""
-    from src.models.baselines import AVAILABLE
-    assert "tabpfn" not in AVAILABLE
-
-
-def test_tabpfn_baseline_builds():
-    from src.models.baselines import TabPFNBaseline
-    b = TabPFNBaseline(epochs=1, n_estimators_final_inference=1)
-    assert b is not None
-    assert not b._fitted
-
-
-def test_classical_branch_wrapper_selects_tabpfn_baseline():
-    from src.models.baselines import ClassicalBranchWrapper, TabPFNBaseline
-    w = ClassicalBranchWrapper(in_features=N_FEAT, model_type="tabpfn",
-                               epochs=1, n_estimators_final_inference=1)
-    assert isinstance(w.baseline, TabPFNBaseline)
-
-
-def test_tabpfn_wrapper_returns_zeros_before_fit():
-    from src.models.baselines import ClassicalBranchWrapper
-    w = ClassicalBranchWrapper(in_features=N_FEAT, model_type="tabpfn",
-                               epochs=1, n_estimators_final_inference=1)
-    x = torch.rand(4, N_FEAT)
-    out = w(x)
-    assert out.shape == (4, 32)
-    assert out.sum().item() == pytest.approx(0.0)
-
-
-def test_is_classical_backbone_true_for_tabpfn():
-    from src.models.reintervention import ReinterventionRiskModel, is_classical_backbone
-    model = ReinterventionRiskModel(
-        clinical_dim=N_FEAT, aaa_dim=0, clinical_backbone="tabpfn",
-        tabm_cfg=dict(epochs=1, n_estimators_final_inference=1),
-    )
-    assert is_classical_backbone(model)
+# TabPFN tests live in tests/test_tabpfn.py

@@ -383,11 +383,12 @@ def fit_classical_backbone(
     what the DataLoader delivers to the model at runtime.
     """
     from src.data.loaders import build_tabular_arrays
-    from src.models.baselines import ClassicalBranchWrapper
+    from src.models.reintervention import is_classical_backbone
+
+    if not is_classical_backbone(model):
+        return
 
     branch = get_model(model).clinical_branch
-    if not isinstance(branch, ClassicalBranchWrapper):
-        return
 
     X_raw, y, _ = build_tabular_arrays(train_ids, config, feature_names)
 
@@ -398,11 +399,9 @@ def fit_classical_backbone(
     X_aaa  = X_raw[:, n_clin:]                      # raw AAA scalars (no z-norm)
     X      = np.concatenate([X_clin, X_aaa], axis=1)
 
-    n_pos = int(y.sum())
-    print(
-        f"  Fitting {branch.model_type.upper()} on {len(y)} train samples "
-        f"(pos={n_pos}, neg={len(y)-n_pos})"
-    )
+    n_pos  = int(y.sum())
+    name   = getattr(branch, "model_type", type(branch).__name__).upper()
+    print(f"  Fitting {name} on {len(y)} train samples (pos={n_pos}, neg={len(y)-n_pos})")
     branch.fit(X, y)
     print(f"  Classical backbone fitted and ready.")
 

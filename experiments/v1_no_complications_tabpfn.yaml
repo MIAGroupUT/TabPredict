@@ -30,7 +30,7 @@ model:
     epochs: 20                      # fine-tuning epochs (conservative; early stopping kicks in)
     learning_rate: 1.0e-5           # very low — preserves pretrained in-context priors
     early_stopping_patience: 5
-    n_estimators_final_inference: 4 # ensemble size at inference (4 = speed/quality trade-off)
+    n_estimators_final_inference: 4 # projection input = n_estimators * 2 = 8 (per-estimator raw logits)
     random_state: 3299
 
 training:

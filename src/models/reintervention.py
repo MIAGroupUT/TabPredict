@@ -42,8 +42,13 @@ def get_model(m: nn.Module) -> nn.Module:
 
 
 def is_classical_backbone(model: nn.Module) -> bool:
-    """True when the tabular branch is a non-differentiable classical ML model."""
-    return isinstance(get_model(model).clinical_branch, ClassicalBranchWrapper)
+    """True when the tabular branch is non-differentiable (no gradient path).
+
+    Covers both sklearn wrappers (ClassicalBranchWrapper) and TabPFN
+    (TabPFNBranchWrapper).  Both set ``_is_non_differentiable = True``.
+    """
+    branch = get_model(model).clinical_branch
+    return getattr(branch, "_is_non_differentiable", False)
 
 
 def disable_checkpointing(model: nn.Module) -> None:
@@ -197,6 +202,9 @@ class ReinterventionRiskModel(nn.Module):
         """
         if backbone in CLASSICAL_BACKBONES:
             return ClassicalBranchWrapper(clinical_dim, backbone, **tabm_cfg)
+        if backbone == "tabpfn":
+            from src.models.tabpfn import TabPFNBranchWrapper
+            return TabPFNBranchWrapper(in_features=clinical_dim, **tabm_cfg)
         if backbone == "tabm":
             from src.models.tabm import TabMEmbed
             return TabMEmbed(clinical_dim=clinical_dim, out_dim=32, **tabm_cfg)
@@ -212,7 +220,7 @@ class ReinterventionRiskModel(nn.Module):
             )
         raise ValueError(
             f"Unknown clinical_backbone {backbone!r}. "
-            f"Choose 'mlp', 'tabm', 'saint', or one of {CLASSICAL_BACKBONES}."
+            f"Choose 'mlp', 'tabm', 'saint', 'tabpfn', or one of {CLASSICAL_BACKBONES}."
         )
 
     def _film(self, x: torch.Tensor, gamma_beta: torch.Tensor) -> torch.Tensor:
