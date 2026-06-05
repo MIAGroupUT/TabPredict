@@ -569,7 +569,7 @@ def run_pipeline(cfg: dict) -> None:
                 reint_gt = batch["reintervention_label"].to(DEVICE).float()
 
                 opt.zero_grad()
-                with torch.cuda.amp.autocast():
+                with torch.amp.autocast('cuda'):
                     outputs     = model(cta=cta, clin=clin, aaa=aaa)
                     reint_logit = outputs[0]
 

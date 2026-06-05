@@ -50,10 +50,16 @@ try:
 except ImportError:
     _XGB_AVAILABLE = False
 
-AVAILABLE: list[str] = ["lr", "rf", "gbm", "xgboost"]
+try:
+    from tabpfn.finetuning.finetuned_classifier import FinetunedTabPFNClassifier
+    _TABPFN_AVAILABLE = True
+except ImportError:
+    _TABPFN_AVAILABLE = False
 
-# Subset recognised as clinical_backbone values in ReinterventionRiskModel
-CLASSICAL_BACKBONES: list[str] = AVAILABLE
+AVAILABLE: list[str] = ["lr", "rf", "gbm", "xgboost"]   # sklearn-only backends
+
+# All non-differentiable backbone keys recognised by ReinterventionRiskModel
+CLASSICAL_BACKBONES: list[str] = [*AVAILABLE, "tabpfn"]
 
 _DEFAULTS: dict[str, dict] = {
     "lr": dict(
@@ -169,6 +175,63 @@ class TabularBaseline:
         return X
 
 
+# ── TabPFN baseline ───────────────────────────────────────────────────────────
+
+class TabPFNBaseline:
+    """Wraps FinetunedTabPFNClassifier with the same fit/predict_proba interface
+    as TabularBaseline so it drops into ClassicalBranchWrapper unchanged.
+
+    Fine-tuning procedure (official TabPFN API, no LoRA needed):
+      - Full weight fine-tuning at lr=1e-5 — very conservative, preserves pretrained priors
+      - Meta-learning objective: split training samples into context + query per step,
+        train the transformer to predict query labels given context
+      - Early stopping on internal 10% validation split (patience=5)
+
+    Weights are downloaded automatically to ~/.cache/tabpfn/ from
+    HuggingFace (Prior-Labs/TabPFN-v2-clf) on first use.
+    """
+
+    def __init__(
+        self,
+        epochs: int = 20,
+        learning_rate: float = 1e-5,
+        early_stopping_patience: int = 5,
+        n_estimators_final_inference: int = 4,
+        random_state: int = 42,
+        device: str | None = None,
+    ) -> None:
+        if not _TABPFN_AVAILABLE:
+            raise ImportError(
+                "tabpfn is not installed. Run: pip install tabpfn"
+            )
+        import torch as _torch
+        _device = device or ("cuda" if _torch.cuda.is_available() else "cpu")
+        self._clf = FinetunedTabPFNClassifier(
+            device=_device,
+            epochs=epochs,
+            learning_rate=learning_rate,
+            early_stopping=True,
+            early_stopping_patience=early_stopping_patience,
+            n_estimators_finetune=2,
+            n_estimators_validation=2,
+            n_estimators_final_inference=n_estimators_final_inference,
+            # must be False when finetune/validation/final estimator counts differ
+            use_fixed_preprocessing_seed=False,
+            random_state=random_state,
+            eval_metric="roc_auc",
+        )
+        self._fitted = False
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> "TabPFNBaseline":
+        self._clf.fit(X, y)
+        self._fitted = True
+        return self
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        """Return positive-class probability for each sample, shape (N,)."""
+        return self._clf.predict_proba(X)[:, 1]
+
+
 # ── integrated backbone wrapper ───────────────────────────────────────────────
 
 class ClassicalBranchWrapper(nn.Module):
@@ -193,7 +256,11 @@ class ClassicalBranchWrapper(nn.Module):
         super().__init__()
         self.model_type  = model_type
         self.in_features = in_features
-        self.baseline    = TabularBaseline(model_type, **kwargs)
+        self.baseline    = (
+            TabPFNBaseline(**kwargs)
+            if model_type == "tabpfn"
+            else TabularBaseline(model_type, **kwargs)
+        )
         self.projection  = nn.Linear(1, 32)
         self._fitted: bool = False
 

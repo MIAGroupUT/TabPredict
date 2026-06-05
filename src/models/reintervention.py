@@ -200,6 +200,9 @@ class ReinterventionRiskModel(nn.Module):
         if backbone == "tabm":
             from src.models.tabm import TabMEmbed
             return TabMEmbed(clinical_dim=clinical_dim, out_dim=32, **tabm_cfg)
+        if backbone == "saint":
+            from src.models.saint import SAINTEmbed
+            return SAINTEmbed(clinical_dim=clinical_dim, out_dim=32, **tabm_cfg)
         if backbone == "mlp":
             return nn.Sequential(
                 nn.Linear(clinical_dim, 128), nn.LayerNorm(128), nn.ReLU(),
@@ -209,7 +212,7 @@ class ReinterventionRiskModel(nn.Module):
             )
         raise ValueError(
             f"Unknown clinical_backbone {backbone!r}. "
-            f"Choose 'mlp', 'tabm', or one of {CLASSICAL_BACKBONES}."
+            f"Choose 'mlp', 'tabm', 'saint', or one of {CLASSICAL_BACKBONES}."
         )
 
     def _film(self, x: torch.Tensor, gamma_beta: torch.Tensor) -> torch.Tensor:

@@ -1,0 +1,86 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Experiment: v1_no_complications — SAINT tabular backbone
+#
+# Tabular branch: SAINT (Self-Attention and Intersample Attention Transformer)
+#   style='colrow' — full SAINT with both column and row (intersample) attention
+#   style='col'    — SAINT-s (column attention only, cheaper)
+#
+# All other hyperparameters match v1_no_complications (MLP/TabM baseline).
+# Reference: https://github.com/somepago/saint
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: v1_no_complications_saint
+version: 1
+description: >
+  SAINT tabular backbone: column + intersample attention over feature tokens.
+  Trained from scratch on task data (no pretrained weights).
+
+model:
+  with_complications: false
+  complications: []
+  aaa_dim: 5
+  clinical_backbone: saint
+  backbone_cfg:
+    dim: 16              # per-feature embedding dimension
+    depth: 2             # number of transformer layers
+    heads: 4             # attention heads (column attention)
+    dim_head: 16         # head dimension (column attention)
+    attn_dropout: 0.1
+    ff_dropout: 0.1
+    # 'col'    = SAINT-s: column (feature) attention only        ~66k params ← default
+    # 'colrow' = full SAINT: column + row (intersample) attention ~530k params
+    # Note: row attention benefit is limited with batch_size=8 (only 8 samples attend
+    # each other). Try colrow if you increase batch_size or want the full architecture.
+    style: col
+    mlp_hidden: 32       # hidden size in per-feature embedding MLP
+    # row attention params (only used when style='colrow'):
+    row_heads: 4
+    row_dim_head: 16
+    row_ff_hidden: 128   # bottleneck hidden for row FF (replaces upstream GEGLU to avoid param explosion)
+
+training:
+  seed: 3299
+  batch_size: 8
+  num_workers: 4
+  image_size: [224, 224, 160]
+  voxel_spacing: [1.5, 1.5, 3]
+  hu_range: [-1000, 1000]
+  train_cache_rate: 0.5
+  val_cache_rate: 1.0
+
+  focal_gamma: 2.0
+  label_smoothing: 0.02
+  pos_weight: 1.0
+  max_missing_pct: 0.5
+  gate_l1_weight: 0.0001
+  recall_beta: 2.0
+
+  modality_dropout:
+    p_cta: 0.0
+    p_aaa_given_cta: 0.15
+    p_aaa_given_clin: 0.15
+    p_clinical: 0.15
+
+  xai_every_n_epochs: 3
+  xai_samples: 4
+  xai_gradcam: true
+
+  stages:
+    - name: A
+      epochs: 60
+      patience: 12
+      T_0: 20
+
+    - name: B
+      epochs: 150
+      patience: 20
+      T_0: 30
+
+paths:
+  base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
+  checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_no_complications_SAINT_05062026
+
+wandb:
+  project: AAA-Reintervention-Risk
+  run_name: v1_no_complications_SAINT
+  mode: online

@@ -23,13 +23,6 @@ model:
   complications: []
   aaa_dim: 5
   clinical_backbone: mlp       # mlp | tabm | lr | rf | gbm | xgboost
-  backbone_cfg:                 # hyperparameters forwarded to the chosen backbone
-    k: 16                       # ensemble members (paper default 32; 16 for small data)
-    n_blocks: 2
-    d_block: 64                 # was 128; halved to ~4k params/positive (was 10k — too many for 63 positives)
-    dropout: 0.3
-    num_embeddings: periodic    # periodic | none  (PeriodicEmbeddings lite=True)
-    d_embedding: 8              # was 16; halved to match reduced d_block
 
 training:
   seed: 3299
@@ -73,9 +66,9 @@ training:
 
 paths:
   base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_no_complications_MLP_03062026
+  checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_no_complications_MLP_04062026
 
 wandb:
   project: AAA-Reintervention-Risk
-  run_name: v1_no_complications_mlp
+  run_name: v1_no_complications_MLP
   mode: online

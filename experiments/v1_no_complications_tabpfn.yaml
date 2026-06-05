@@ -1,0 +1,81 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Experiment: v1_no_complications — TabPFN tabular backbone
+#
+# TabPFN is a transformer pretrained on millions of synthetic tabular datasets
+# via meta-learning (Prior-Labs, Nature 2024). Pretrained weights are downloaded
+# automatically to ~/.cache/tabpfn/ from HuggingFace (Prior-Labs/TabPFN-v2-clf).
+#
+# Fine-tuning strategy (built into the tabpfn package, no LoRA needed):
+#   Full weight fine-tuning at lr=1e-5 — very conservative, preserves priors.
+#   Meta-learning objective: split training data into context + query per step,
+#   train transformer to predict query labels from context examples.
+#   Early stopping on internal 10% split (patience=5, ~20 epochs max).
+#
+# After fine-tuning TabPFN is frozen; only the downstream fusion layers train
+# (same as RF/XGB: condition_net, fusion_norm, reintervention_head).
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: v1_no_complications_tabpfn
+version: 1
+description: >
+  TabPFN tabular backbone: pretrained in-context learning transformer,
+  fine-tuned on EVAR training data before Stage A fusion warm-up.
+
+model:
+  with_complications: false
+  complications: []
+  aaa_dim: 5
+  clinical_backbone: tabpfn
+  backbone_cfg:
+    epochs: 20                      # fine-tuning epochs (conservative; early stopping kicks in)
+    learning_rate: 1.0e-5           # very low — preserves pretrained in-context priors
+    early_stopping_patience: 5
+    n_estimators_final_inference: 4 # ensemble size at inference (4 = speed/quality trade-off)
+    random_state: 3299
+
+training:
+  seed: 3299
+  batch_size: 8
+  num_workers: 4
+  image_size: [224, 224, 160]
+  voxel_spacing: [1.5, 1.5, 3]
+  hu_range: [-1000, 1000]
+  train_cache_rate: 0.5
+  val_cache_rate: 1.0
+
+  focal_gamma: 2.0
+  label_smoothing: 0.02
+  pos_weight: 1.0
+  max_missing_pct: 0.5
+  gate_l1_weight: 0.0001
+  recall_beta: 2.0
+
+  modality_dropout:
+    p_cta: 0.0
+    p_aaa_given_cta: 0.15
+    p_aaa_given_clin: 0.15
+    p_clinical: 0.15
+
+  xai_every_n_epochs: 3
+  xai_samples: 4
+  xai_gradcam: true
+
+  stages:
+    - name: A
+      epochs: 60
+      patience: 12
+      T_0: 20
+
+    - name: B
+      epochs: 150
+      patience: 20
+      T_0: 30
+
+paths:
+  base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
+  checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_no_complications_TabPFN_05062026
+
+wandb:
+  project: AAA-Reintervention-Risk
+  run_name: v1_no_complications_TabPFN
+  mode: online

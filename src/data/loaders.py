@@ -55,8 +55,8 @@ DEFAULT_HU_MAX  =  1000
 _SENTINEL_VALUES: frozenset = frozenset({999.0, 9999.0, 99999.0})
 
 # Features that carry no clinical signal and must be dropped before training.
-# PatientNr is a database ID (up to ~1e8) with no clinical meaning.
-_EXCLUDE_FEATURES: frozenset = frozenset({"PatientNr"})
+# PatientNr is a database ID; Site/CreatedInSite encode acquisition site → bias.
+_EXCLUDE_FEATURES: frozenset = frozenset({"PatientNr", "Site", "CreatedInSite"})
 
 # ── I/O helpers ──────────────────────────────────────────────────────────────
 
@@ -104,14 +104,24 @@ def filter_features_by_missingness(
     if max_missing_pct >= 1.0:
         return feature_names
     n = len(train_ids)
-    kept = []
+    kept, dropped = [], []
     for k in feature_names:
         n_missing = sum(
             1 for pid in train_ids
             if np.isnan(config.get(pid, {}).get("pre_op_features", {}).get(k, np.nan))
         )
-        if n_missing / n < max_missing_pct:
+        pct = n_missing / n
+        if pct < max_missing_pct:
             kept.append(k)
+        else:
+            dropped.append((k, pct))
+
+    print(f"[feature filter] kept={len(kept)}  dropped={len(dropped)}  "
+          f"threshold={max_missing_pct:.0%}")
+    if dropped:
+        for k, pct in sorted(dropped, key=lambda x: -x[1]):
+            print(f"  DROP  {k}  ({pct:.0%} missing)")
+
     return kept
 
 

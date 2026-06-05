@@ -299,3 +299,110 @@ def test_unknown_backbone_raises():
             clinical_dim=CLINICAL_DIM, aaa_dim=AAA_DIM,
             clinical_backbone="unknown",
         )
+
+
+# ── SAINT clinical backbone ───────────────────────────────────────────────────
+
+_SAINT_CFG_COL    = dict(dim=8, depth=1, heads=2, dim_head=4, style="col",    mlp_hidden=16)
+_SAINT_CFG_COLROW = dict(dim=8, depth=1, heads=2, dim_head=4, style="colrow", mlp_hidden=16,
+                         row_heads=2, row_dim_head=4, row_ff_hidden=32)
+
+
+@pytest.fixture(scope="module")
+def model_saint_col():
+    from src.models.reintervention import ReinterventionRiskModel
+    return ReinterventionRiskModel(
+        clinical_dim=CLINICAL_DIM, aaa_dim=AAA_DIM, complications=[],
+        clinical_backbone="saint", tabm_cfg=_SAINT_CFG_COL,
+    ).eval()
+
+
+@pytest.fixture(scope="module")
+def model_saint_colrow():
+    from src.models.reintervention import ReinterventionRiskModel
+    return ReinterventionRiskModel(
+        clinical_dim=CLINICAL_DIM, aaa_dim=AAA_DIM, complications=[],
+        clinical_backbone="saint", tabm_cfg=_SAINT_CFG_COLROW,
+    ).eval()
+
+
+def test_saint_col_builds(model_saint_col):
+    assert model_saint_col is not None
+
+
+def test_saint_col_stores_backbone(model_saint_col):
+    assert model_saint_col.clinical_backbone == "saint"
+
+
+def test_saint_col_forward_shape(model_saint_col, cta, clin, aaa):
+    out = model_saint_col(cta, clin, aaa)
+    assert len(out) == 1
+    assert out[0].shape == (BATCH, 1)
+
+
+def test_saint_col_forward_finite(model_saint_col, cta, clin, aaa):
+    out = model_saint_col(cta, clin, aaa)
+    assert torch.isfinite(out[0]).all()
+
+
+def test_saint_col_clinical_branch_output_dim(model_saint_col, clin, aaa):
+    gated = clin * torch.sigmoid(model_saint_col.feature_gate)
+    c_in  = torch.cat([gated, aaa], dim=1)
+    emb   = model_saint_col.clinical_branch(c_in)
+    assert emb.shape == (BATCH, 32)
+
+
+def test_saint_colrow_forward_shape(model_saint_colrow, cta, clin, aaa):
+    out = model_saint_colrow(cta, clin, aaa)
+    assert len(out) == 1
+    assert out[0].shape == (BATCH, 1)
+
+
+def test_saint_colrow_clinical_branch_output_dim(model_saint_colrow, clin, aaa):
+    gated = clin * torch.sigmoid(model_saint_colrow.feature_gate)
+    c_in  = torch.cat([gated, aaa], dim=1)
+    emb   = model_saint_colrow.clinical_branch(c_in)
+    assert emb.shape == (BATCH, 32)
+
+
+def test_saint_col_uses_feature_gate(model_saint_col, clin, aaa):
+    """SAINT backbone is differentiable — feature_gate must be in use."""
+    from src.models.reintervention import is_classical_backbone
+    assert not is_classical_backbone(model_saint_col)
+
+
+# ── SAINTEmbed unit tests ─────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("style", ["col", "colrow"])
+def test_saint_embed_output_shape(style):
+    from src.models.saint import SAINTEmbed
+    n_feat = CLINICAL_DIM + AAA_DIM
+    m = SAINTEmbed(clinical_dim=n_feat, out_dim=32, dim=8, depth=1,
+                   heads=2, dim_head=4, style=style, mlp_hidden=16,
+                   row_heads=2, row_dim_head=4, row_ff_hidden=32)
+    x = torch.rand(BATCH, n_feat)
+    out = m(x)
+    assert out.shape == (BATCH, 32)
+
+
+@pytest.mark.parametrize("style", ["col", "colrow"])
+def test_saint_embed_finite(style):
+    from src.models.saint import SAINTEmbed
+    n_feat = CLINICAL_DIM + AAA_DIM
+    m = SAINTEmbed(clinical_dim=n_feat, out_dim=32, dim=8, depth=1,
+                   heads=2, dim_head=4, style=style, mlp_hidden=16,
+                   row_heads=2, row_dim_head=4, row_ff_hidden=32)
+    x = torch.rand(BATCH, n_feat)
+    assert torch.isfinite(m(x)).all()
+
+
+def test_saint_embed_gradients_flow():
+    from src.models.saint import SAINTEmbed
+    n_feat = CLINICAL_DIM + AAA_DIM
+    m = SAINTEmbed(clinical_dim=n_feat, out_dim=32, dim=8, depth=1,
+                   heads=2, dim_head=4, style="col", mlp_hidden=16)
+    x = torch.rand(BATCH, n_feat, requires_grad=True)
+    loss = m(x).sum()
+    loss.backward()
+    assert x.grad is not None
+    assert x.grad.abs().sum() > 0

@@ -13,6 +13,40 @@ _No unreleased changes._
 
 ---
 
+## [2026-06-05] — Add SAINT + TabPFN tabular backbones; feature gate exclusions; tests + docs
+
+### Added
+
+- **`src/models/saint.py`** — `SAINTEmbed`: SAINT (Self-Attention and Intersample Attention Transformer) tabular backbone integrated from [somepago/saint](https://github.com/somepago/saint). All-continuous input, trained from scratch on task data (no pretrained weights). Two styles: `col` (column/feature attention only, ~66k params, SAINT-s) and `colrow` (column + intersample/row attention, ~850k params, full SAINT). Row FF uses a bottleneck MLP (`dim→row_ff_hidden→dim`, default hidden=128) instead of the upstream GEGLU×4 which would explode to ~1.7M params/layer for 47 features at dim=16. Satisfies `(B, clinical_dim) → (B, 32)` branch contract via a flatten + `Linear(n_features×dim, 32)` projection.
+- **`experiments/v1_no_complications_saint.yaml`** — new experiment config for SAINT backbone. Defaults to `style: col` (SAINT-s) with `dim=16, depth=2, heads=4`. Switch to `style: colrow` for full intersample attention (most beneficial with larger batch sizes). SLURM job submitted as **509231**.
+- **`TabPFNBaseline`** in `src/models/baselines.py` — wraps `FinetunedTabPFNClassifier` (from the `tabpfn` package, Prior-Labs / Nature 2024) with the same `fit`/`predict_proba` interface as `TabularBaseline`. Pretrained weights downloaded automatically to `~/.cache/tabpfn/` from HuggingFace (`Prior-Labs/TabPFN-v2-clf`). Fine-tuning uses the built-in meta-learning loop: `lr=1e-5`, 20 epochs max, early stopping (patience=5), `n_estimators_final_inference=4`. No LoRA needed — `FinetunedTabPFNClassifier` already does conservative full fine-tuning that preserves the pretrained in-context priors.
+- **`tabpfn` added to `CLASSICAL_BACKBONES`** (non-differentiable backbone list) while keeping it out of `AVAILABLE` (sklearn-only list used for `TabularBaseline` parametrisation and tests).
+- **`experiments/v1_no_complications_tabpfn.yaml`** — new experiment config for TabPFN backbone. SLURM job submitted as **509241**.
+- **`tabpfn==8.0.6`** added to `requirements.txt` and `requirements-ci.txt`.
+- **19 new tests in `tests/test_models.py`** covering SAINT: `SAINTEmbed` output shape and finiteness for both `col` and `colrow` styles, gradient flow through the backbone, full `ReinterventionRiskModel` integration (forward shape, finite output, clinical branch dim, `is_classical_backbone=False`).
+- **7 new tests in `tests/test_baselines.py`** covering TabPFN: `tabpfn` membership in `CLASSICAL_BACKBONES` but not `AVAILABLE`, `TabPFNBaseline` instantiation, `ClassicalBranchWrapper` backbone selection, zero output before fit, `is_classical_backbone=True`. Total suite: **382 tests**.
+- **`eval/compare_results.ipynb` §7 — AUROC Forest Plot** with 95% bootstrap CI per model/split. Resamples saved per-patient predictions 1 000 times; 2.5th/97.5th percentiles form the whiskers.
+- **`eval/compare_results.ipynb` §8 — Cross-model AUROC Matrix** (heatmap, rows = run, columns = train/val/test). Δ train−test column flags overfitting: 🟢 <0.02 · 🟡 0.02–0.05 · 🔴 >0.05.
+- **`eval/compare_results.ipynb` §9 — Pairwise Bootstrap Significance** table. Bootstraps ΔAUC 1 000 times per run-pair, reports two-sided p-value and significance stars.
+- **Full section documentation** added to all 9 notebook section headers (*What / How / How to read / Why*).
+
+### Fixed
+
+- **`torch.cuda.amp.autocast()` → `torch.amp.autocast('cuda')`** in `src/training/trainer.py` — silences PyTorch deprecation warning on 2.x.
+- **Foundation model downstream OOM** (`claude_goal/`): `batch_size` 6→2; added `gradient_checkpointing: true` and `use_checkpoint: true` to all three downstream configs.
+- **Foundation model downstream DataParallel → DDP** (`claude_goal/`): `downstream_trainer.py` and `finetune_downstream.py` converted to `DistributedDataParallel`; rank-0 gating for checkpoints, W&B logging, and early-stop broadcast.
+- **SSL probe OOM** (`claude_goal/`): `extract_traj_tokens` / `intra_inter_distance_ratio` replaced batch-all-timepoints processing with `_encode_timepoints_loop` (one timepoint at a time, 8× lower peak VRAM).
+
+### Changed
+
+- **`CLASSICAL_BACKBONES`** split from `AVAILABLE`: `AVAILABLE = ["lr", "rf", "gbm", "xgboost"]` (sklearn only, used by `TabularBaseline` and tests); `CLASSICAL_BACKBONES = [*AVAILABLE, "tabpfn"]` (all non-differentiable backbone keys for `ReinterventionRiskModel`).
+- **`_EXCLUDE_FEATURES`** in `src/data/loaders.py`: added `"Site"` and `"CreatedInSite"` alongside `"PatientNr"`. Both encode acquisition site → would introduce site bias. Already NaN after `_clean_clinical_features` (non-numeric strings), so no retraining required for existing checkpoints.
+- **`filter_features_by_missingness`** in `src/data/loaders.py`: now prints a `[feature filter]` summary to stdout showing kept/dropped counts, threshold, and one `DROP <key> (XX% missing)` line per dropped feature sorted by missingness descending. Captured in SLURM `.log`.
+- **`experiments/v1_no_complications.yaml`**: `checkpoint_dir` suffix `MLP_03062026` → `MLP_04062026`; `run_name` `mlp` → `MLP`; `backbone_cfg:` block simplified.
+- **`CLAUDE.md` architecture section** updated: tabular branch table now lists all 6 backbone options (`mlp`, `tabm`, `saint`, `lr`/`rf`/`gbm`/`xgboost`, `tabpfn`) with param counts, training mode, and implementation pointers; repository structure updated with new model files and experiment configs.
+
+---
+
 ## [2026-06-04] — Classical LR backbones; train metrics; multi-split eval; eval notebook; XAI fix; config renames
 
 ### Added
