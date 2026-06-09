@@ -16,5 +16,6 @@ packaging==25.0
 xgboost==3.2.0
 tabm==0.0.3
 rtdl_num_embeddings==0.0.12
+tabpfn==8.0.6
 pytest==9.0.3
 pytest-cov==6.0.0

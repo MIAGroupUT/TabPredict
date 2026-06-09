@@ -13,6 +13,30 @@ _No unreleased changes._
 
 ---
 
+## [2026-06-08] — TabPFN single-checkpoint fix; median imputation; XGBoost NaN passthrough
+
+### Added
+
+- **`TabPFNBranchWrapper.model_dir`** — new `__init__` parameter. Globs `tabpfn-v2.5-classifier*.ckpt` from a local directory and passes the canonical **`_default.ckpt`** (matching `ModelSource.get_classifier_v2_5().default_filename`) as a single path string to `FinetunedTabPFNClassifier`, bypassing HuggingFace and `TabPFNLicenseError`. Weights at `/deepstore/datasets/mia/AI4EVAR/checkpoints/tabpfn/` (9 v2.5 checkpoints). Configured via `backbone_cfg.model_dir` in `experiments/v1_no_complications_tabpfn.yaml`. **Why single checkpoint**: passing a list triggers multi-model mode in `TabPFNClassifier`; `FinetunedTabPFNClassifier._fit` then calls `self.finetuned_estimator_.model_.to(device)` which raises `ValueError: The model_ property is not supported when multiple models are used`. `n_estimators_final_inference=4` still ensembles via different preprocessing seeds over the one fine-tuned model.
+- **`compute_clin_stats`** now returns a third value — per-feature **median** (shape `(n_features,)`, float32). All-NaN features fall back to the mean. Used to compute `clin_fill = (median − mean) / std` (z-scored median), the new NaN fill value for `NormalizeClinicald`.
+- **`NormalizeClinicald.fill_value`** — optional per-feature `np.ndarray` (in z-space). When provided, missing values are replaced by the z-scored median instead of 0 (mean). Falls back to `nan_to_num(..., nan=0.0)` when `None` for backward compatibility. Wired through `get_train/val_runtime_transforms` and `build_loaders` via a new `clin_fill` parameter.
+- **9 new tests** in `tests/test_loaders.py`: `test_compute_clin_stats_returns_median`, `test_compute_clin_stats_all_nan_median_falls_back_to_mean`, `test_normalize_clinical_fill_value_used_for_nan`, `test_normalize_clinical_no_fill_defaults_to_zero`, `test_normalize_clinical_fill_value_only_replaces_nan`.
+- **3 new tests** in `tests/test_baselines.py`: `test_xgboost_impute_preserves_nans`, `test_non_xgboost_impute_fills_nans_with_median`, `test_fit_classical_backbone_passes_nans_to_branch`.
+
+### Fixed
+
+- **`TabularBaseline._impute`** — XGBoost now returns the input array unchanged (NaNs preserved) so the model's native learned-direction split logic fires instead of a fixed median fill. All other backends (LR, RF, GBM) continue to receive median imputation.
+- **`fit_classical_backbone`** — removed the `nan→0` pre-fill that silently overwrote NaNs with zero (mean in z-space) *before* `TabularBaseline._impute()` was called, making the median imputation in `_impute()` dead code. Classical backbones now receive z-scored features with NaNs intact, and each model's own imputation strategy fires correctly.
+
+### Changed
+
+- **`TabPFNBranchWrapper`** — `n_estimators_finetune` 2→1 and `n_estimators_validation` 2→1. Required to keep the fine-tuning estimator in single-model mode, consistent with passing a single checkpoint path.
+- **`experiments/v1_xgboost.yaml`** — `checkpoint_dir` and `run_name` bumped to `_08062026`; re-submitted as SLURM job **510615** with corrected NaN handling.
+- **`experiments/v1_logistic_regression.yaml`** — `checkpoint_dir` and `run_name` bumped to `_08062026`; re-submitted as SLURM job **510616** with corrected median imputation.
+- **`experiments/v1_no_complications_tabpfn.yaml`** — `checkpoint_dir` and `run_name` bumped to `_08062026`; `backbone_cfg.model_dir` added; re-submitted as SLURM job **511368** loading weights from deepstore.
+
+---
+
 ## [2026-06-05] — Add SAINT + TabPFN tabular backbones; feature gate exclusions; tests + docs
 
 ### Added

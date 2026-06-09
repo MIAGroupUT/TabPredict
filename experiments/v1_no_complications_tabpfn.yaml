@@ -2,8 +2,8 @@
 # Experiment: v1_no_complications — TabPFN tabular backbone
 #
 # TabPFN is a transformer pretrained on millions of synthetic tabular datasets
-# via meta-learning (Prior-Labs, Nature 2024). Pretrained weights are downloaded
-# automatically to ~/.cache/tabpfn/ from HuggingFace (Prior-Labs/TabPFN-v2-clf).
+# via meta-learning (Prior-Labs, Nature 2024). Pretrained weights are loaded
+# from backbone_cfg.model_dir (local deepstore copy, no HuggingFace download).
 #
 # Fine-tuning strategy (built into the tabpfn package, no LoRA needed):
 #   Full weight fine-tuning at lr=1e-5 — very conservative, preserves priors.
@@ -32,6 +32,7 @@ model:
     early_stopping_patience: 5
     n_estimators_final_inference: 4 # projection input = n_estimators * 2 = 8 (per-estimator raw logits)
     random_state: 3299
+    model_dir: /deepstore/datasets/mia/AI4EVAR/checkpoints/tabpfn
 
 training:
   seed: 3299
@@ -73,9 +74,9 @@ training:
 
 paths:
   base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_no_complications_TabPFN_05062026
+  checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_no_complications_TabPFN_08062026
 
 wandb:
   project: AAA-Reintervention-Risk
-  run_name: v1_no_complications_TabPFN
+  run_name: v1_no_complications_TabPFN_08062026
   mode: online

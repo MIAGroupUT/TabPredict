@@ -66,6 +66,7 @@ PyYAML==6.0.3               # Config file parsing
 xgboost==3.2.0
 tabm==0.0.3                       # TabM: parameter-efficient tabular ensembling (Gorishniy et al., 2024)
 rtdl_num_embeddings==0.0.12       # PeriodicEmbeddings for TabM numerical feature encoding
+tabpfn==8.0.6
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 pytest==9.0.3

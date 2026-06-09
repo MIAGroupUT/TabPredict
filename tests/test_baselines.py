@@ -290,4 +290,62 @@ def test_fit_classical_backbone_forward_no_zeros(model_type):
     assert not torch.all(out == 0)
 
 
+# ── imputation behaviour per model type ──────────────────────────────────────
+
+
+def test_xgboost_impute_preserves_nans():
+    """XGBoost skips _impute so NaNs reach the model's native handler."""
+    from src.models.baselines import TabularBaseline
+    baseline = TabularBaseline("xgboost")
+    X = np.array([[1.0, np.nan], [2.0, 3.0]], dtype=np.float32)
+    result = baseline._impute(X, fit=True)
+    assert np.isnan(result[0, 1]), "XGBoost should receive NaN, not a filled value"
+
+
+@pytest.mark.parametrize("model_type", ["lr", "rf", "gbm"])
+def test_non_xgboost_impute_fills_nans_with_median(model_type):
+    """LR / RF / GBM: _impute fills NaNs with the training-set column median."""
+    from src.models.baselines import TabularBaseline
+    baseline = TabularBaseline(model_type)
+    # col 0: values 1, 3 → median 2.0; col 1: value 5 only (NaN excluded) → median 5.0
+    X_fit = np.array([[1.0, np.nan], [3.0, 5.0]], dtype=np.float32)
+    result = baseline._impute(X_fit, fit=True)
+    assert result[0, 1] == pytest.approx(5.0)   # NaN filled with median of col 1
+    assert not np.isnan(result).any()
+
+
+def test_fit_classical_backbone_passes_nans_to_branch(monkeypatch):
+    """fit_classical_backbone must NOT zero NaNs before calling branch.fit()."""
+    from src.models.reintervention import ReinterventionRiskModel
+    from src.training.trainer import fit_classical_backbone
+
+    ids, feats, config = _make_synthetic_config(20)
+    # Inject a NaN into every patient's first feature
+    for pid in ids:
+        config[pid]["pre_op_features"][feats[0]] = float("nan")
+
+    mean = np.zeros(len(feats), dtype=np.float32)
+    std  = np.ones(len(feats),  dtype=np.float32)
+
+    received: list = []
+
+    model = ReinterventionRiskModel(
+        clinical_dim=len(feats), aaa_dim=5, clinical_backbone="lr"
+    )
+    original_fit = model.clinical_branch.baseline.fit
+
+    def capturing_fit(X, y):
+        received.append(X.copy())
+        return original_fit(X, y)
+
+    monkeypatch.setattr(model.clinical_branch.baseline, "fit", capturing_fit)
+    fit_classical_backbone(model, ids, config, feats, mean, std)
+
+    assert len(received) == 1
+    # First feature column must still contain NaN — not pre-zeroed
+    assert np.isnan(received[0][:, 0]).any(), (
+        "fit_classical_backbone should not zero NaNs before calling branch.fit()"
+    )
+
+
 # TabPFN tests live in tests/test_tabpfn.py

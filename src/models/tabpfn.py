@@ -38,6 +38,7 @@ Contract
 from __future__ import annotations
 
 import io
+from pathlib import Path
 
 import joblib
 import numpy as np
@@ -92,6 +93,7 @@ class TabPFNBranchWrapper(nn.Module):
         n_estimators_final_inference: int = 4,
         random_state: int = 42,
         device: str | None = None,
+        model_dir: str | None = None,
     ) -> None:
         super().__init__()
         if not _TABPFN_AVAILABLE:
@@ -101,18 +103,38 @@ class TabPFNBranchWrapper(nn.Module):
         self.n_estimators = n_estimators_final_inference
         _device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
+        extra: dict = {}
+        if model_dir is not None:
+            ckpts = sorted(Path(model_dir).glob("tabpfn-v2.5-classifier*.ckpt"))
+            if not ckpts:
+                raise FileNotFoundError(
+                    f"No TabPFN v2.5 classifier checkpoints found in {model_dir}"
+                )
+            # Pass a single checkpoint: multi-model mode breaks FinetunedTabPFNClassifier
+            # (finetuned_base._fit calls .model_ which raises with multiple models).
+            # Fine-tuning tunes one model; n_estimators_final_inference ensembles via
+            # different preprocessing seeds on that single fine-tuned model.
+            # Prefer the canonical default (matches TabPFN's own default_filename);
+            # sorted() puts _default-2 before _default alphabetically, so ckpts[0]
+            # would be wrong.
+            default_ckpt = next(
+                (p for p in ckpts if p.name.endswith("_default.ckpt")), ckpts[0]
+            )
+            extra = {"model_path": str(default_ckpt)}
+
         self._clf = FinetunedTabPFNClassifier(
             device=_device,
             epochs=epochs,
             learning_rate=learning_rate,
             early_stopping=True,
             early_stopping_patience=early_stopping_patience,
-            n_estimators_finetune=2,
-            n_estimators_validation=2,
+            n_estimators_finetune=1,
+            n_estimators_validation=1,
             n_estimators_final_inference=n_estimators_final_inference,
             use_fixed_preprocessing_seed=False,
             random_state=random_state,
             eval_metric="roc_auc",
+            extra_classifier_kwargs=extra or None,
         )
         # n_estimators * n_classes raw logits before any averaging or softmax
         self.projection = nn.Linear(n_estimators_final_inference * _N_CLASSES, out_dim)

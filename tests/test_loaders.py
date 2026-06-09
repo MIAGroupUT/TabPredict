@@ -249,7 +249,7 @@ def test_compute_clin_stats_mean():
         "p1": {"pre_op_features": {"a": 1.0, "b": 3.0}},
         "p2": {"pre_op_features": {"a": 3.0, "b": 5.0}},
     }
-    mean, _ = compute_clin_stats(["p1", "p2"], config, ["a", "b"])
+    mean, _, _ = compute_clin_stats(["p1", "p2"], config, ["a", "b"])
     np.testing.assert_allclose(mean, [2.0, 4.0])
 
 
@@ -259,7 +259,7 @@ def test_compute_clin_stats_std_positive():
         "p1": {"pre_op_features": {"a": 0.0}},
         "p2": {"pre_op_features": {"a": 1.0}},
     }
-    _, std = compute_clin_stats(["p1", "p2"], config, ["a"])
+    _, std, _ = compute_clin_stats(["p1", "p2"], config, ["a"])
     assert std[0] > 0  # +1e-8 floor
 
 
@@ -273,7 +273,7 @@ def test_compute_clin_stats_sentinel_excluded_from_mean():
         "p2": {"pre_op_features": {"a": 2.0}},
         "p3": {"pre_op_features": {"a": 4.0}},
     }
-    mean, std = compute_clin_stats(["p1", "p2", "p3"], config, ["a"])
+    mean, std, _ = compute_clin_stats(["p1", "p2", "p3"], config, ["a"])
     assert mean[0] == pytest.approx(3.0)   # nanmean([NaN, 2, 4]) = 3.0
     assert std[0]  >  0
 
@@ -285,7 +285,7 @@ def test_compute_clin_stats_all_nan_feature_gets_neutral_stats():
         "p1": {"pre_op_features": {"a": np.nan}},
         "p2": {"pre_op_features": {"a": np.nan}},
     }
-    mean, std = compute_clin_stats(["p1", "p2"], config, ["a"])
+    mean, std, _ = compute_clin_stats(["p1", "p2"], config, ["a"])
     assert mean[0] == pytest.approx(0.0)
     assert std[0]  == pytest.approx(1.0 + 1e-8)
 
@@ -297,7 +297,7 @@ def test_compute_clin_stats_constant_feature():
         "p1": {"pre_op_features": {"a": 5.0}},
         "p2": {"pre_op_features": {"a": 5.0}},
     }
-    mean, std = compute_clin_stats(["p1", "p2"], config, ["a"])
+    mean, std, _ = compute_clin_stats(["p1", "p2"], config, ["a"])
     assert mean[0] == pytest.approx(5.0)
     assert std[0]  == pytest.approx(1e-8)
 
@@ -309,8 +309,70 @@ def test_compute_clin_stats_missing_key_excluded_from_mean():
         "p1": {"pre_op_features": {}},          # missing "a" → NaN
         "p2": {"pre_op_features": {"a": 4.0}},  # only real observation
     }
-    mean, _ = compute_clin_stats(["p1", "p2"], config, ["a"])
+    mean, _, _ = compute_clin_stats(["p1", "p2"], config, ["a"])
     assert mean[0] == pytest.approx(4.0)  # nanmean([NaN, 4.0]) = 4.0
+
+
+def test_compute_clin_stats_returns_median():
+    """Third return value is the per-feature median (NaN-excluded)."""
+    from src.data.loaders import compute_clin_stats
+    config = {
+        "p1": {"pre_op_features": {"a": 1.0}},
+        "p2": {"pre_op_features": {"a": 2.0}},
+        "p3": {"pre_op_features": {"a": 9.0}},
+    }
+    _, _, median = compute_clin_stats(["p1", "p2", "p3"], config, ["a"])
+    assert median[0] == pytest.approx(2.0)  # nanmedian([1, 2, 9]) = 2.0
+
+
+def test_compute_clin_stats_all_nan_median_falls_back_to_mean():
+    """100%-missing feature: median falls back to mean (both 0.0)."""
+    from src.data.loaders import compute_clin_stats
+    config = {
+        "p1": {"pre_op_features": {"a": np.nan}},
+        "p2": {"pre_op_features": {"a": np.nan}},
+    }
+    mean, _, median = compute_clin_stats(["p1", "p2"], config, ["a"])
+    assert median[0] == pytest.approx(mean[0])
+
+
+def test_normalize_clinical_fill_value_used_for_nan():
+    """NormalizeClinicald uses fill_value (z-scored median) for missing entries."""
+    import torch
+    from src.data.loaders import NormalizeClinicald
+    mean  = np.array([0.0], dtype=np.float32)
+    std   = np.array([1.0], dtype=np.float32)
+    fill  = np.array([0.5], dtype=np.float32)   # z-scored median fill
+    tfm   = NormalizeClinicald(keys=["clin"], mean=mean, std=std, fill_value=fill)
+    data  = {"clin": torch.tensor([float("nan")])}
+    out   = tfm(data)["clin"]
+    assert out[0].item() == pytest.approx(0.5)
+
+
+def test_normalize_clinical_no_fill_defaults_to_zero():
+    """Without fill_value, NaNs are filled with 0 (mean in z-space) as before."""
+    import torch
+    from src.data.loaders import NormalizeClinicald
+    mean = np.array([0.0], dtype=np.float32)
+    std  = np.array([1.0], dtype=np.float32)
+    tfm  = NormalizeClinicald(keys=["clin"], mean=mean, std=std)
+    data = {"clin": torch.tensor([float("nan")])}
+    out  = tfm(data)["clin"]
+    assert out[0].item() == pytest.approx(0.0)
+
+
+def test_normalize_clinical_fill_value_only_replaces_nan():
+    """Non-NaN values are z-scored normally; only NaN entries get the fill."""
+    import torch
+    from src.data.loaders import NormalizeClinicald
+    mean  = np.array([2.0, 0.0], dtype=np.float32)
+    std   = np.array([1.0, 1.0], dtype=np.float32)
+    fill  = np.array([99.0, 99.0], dtype=np.float32)
+    tfm   = NormalizeClinicald(keys=["clin"], mean=mean, std=std, fill_value=fill)
+    data  = {"clin": torch.tensor([4.0, float("nan")])}
+    out   = tfm(data)["clin"]
+    assert out[0].item() == pytest.approx(2.0)   # (4 - 2) / 1
+    assert out[1].item() == pytest.approx(99.0)  # NaN → fill
 
 
 # ── build_data_list ───────────────────────────────────────────────────────────

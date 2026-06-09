@@ -392,10 +392,10 @@ def fit_classical_backbone(
 
     X_raw, y, _ = build_tabular_arrays(train_ids, config, feature_names)
 
-    # Apply the same normalisation as NormalizeClinicald: z-score then nan→0
+    # Z-score clinical features; leave NaNs intact so TabularBaseline._impute()
+    # can apply median imputation, and XGBoost can use its native NaN handling.
     n_clin = len(feature_names)
     X_clin = (X_raw[:, :n_clin] - clin_mean) / (clin_std + 1e-8)
-    X_clin = np.where(np.isnan(X_clin), 0.0, X_clin)
     X_aaa  = X_raw[:, n_clin:]                      # raw AAA scalars (no z-norm)
     X      = np.concatenate([X_clin, X_aaa], axis=1)
 
@@ -435,7 +435,8 @@ def run_pipeline(cfg: dict) -> None:
     feature_names   = filter_features_by_missingness(
         splits["train"], config, feature_names, max_missing_pct
     )
-    clin_mean, clin_std = compute_clin_stats(splits["train"], config, feature_names)
+    clin_mean, clin_std, clin_median = compute_clin_stats(splits["train"], config, feature_names)
+    clin_fill = ((clin_median - clin_mean) / clin_std).astype(np.float32)
     print(f"Clinical features : {len(feature_names)}  (max_missing_pct={max_missing_pct})")
 
     train_loader, val_loader = build_loaders(
@@ -446,6 +447,7 @@ def run_pipeline(cfg: dict) -> None:
         train_cache_rate=cfg["training"].get("train_cache_rate", 0.5),
         val_cache_rate=cfg["training"].get("val_cache_rate", 1.0),
         size=size, spacing=spacing, seed=seed,
+        clin_fill=clin_fill,
     )
 
     # ── W&B ──────────────────────────────────────────────────────────────────

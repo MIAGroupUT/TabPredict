@@ -156,6 +156,10 @@ class TabularBaseline:
 
     def _impute(self, X: np.ndarray, fit: bool) -> np.ndarray:
         X = X.copy().astype(np.float32)
+        # XGBoost learns the optimal default direction for NaN at each split —
+        # don't overwrite with a fixed value and lose that signal.
+        if self.model_type == "xgboost":
+            return X
         if fit:
             col_medians = np.nanmedian(X, axis=0)
             self._col_medians = np.where(np.isnan(col_medians), 0.0, col_medians)

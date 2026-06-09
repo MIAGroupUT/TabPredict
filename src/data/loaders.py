@@ -129,13 +129,19 @@ def compute_clin_stats(
     train_ids: list[str],
     config: dict,
     feature_names: list[str],
-) -> tuple[np.ndarray, np.ndarray]:
-    """Compute per-feature mean and std from the training split.
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Compute per-feature mean, std, and median from the training split.
 
     NaN values (missing measurements, sentinel-replaced values) are excluded
     from the statistics so they do not corrupt the mean or std of real values.
     Features that are 100% missing receive mean=0, std=1 so they normalise
     to z=0 for every patient and the gate can cheaply zero them out.
+
+    Returns:
+        mean, std, median — all shape (n_features,), float32.
+        median is used as the NaN fill value (z-scored) in NormalizeClinicald,
+        giving median imputation which is more robust than mean for skewed
+        clinical distributions.
     """
     matrix = np.stack([
         np.array(
@@ -144,12 +150,14 @@ def compute_clin_stats(
         )
         for pid in train_ids
     ])
-    mean = np.nanmean(matrix, axis=0)
-    std  = np.nanstd(matrix,  axis=0)
-    # All-NaN column (100% missing feature): nanmean/nanstd return NaN — set neutral values
-    mean = np.where(np.isnan(mean), 0.0, mean)
-    std  = np.where(np.isnan(std),  1.0, std)
-    return mean.astype(np.float32), (std + 1e-8).astype(np.float32)
+    mean   = np.nanmean(matrix,   axis=0)
+    std    = np.nanstd(matrix,    axis=0)
+    median = np.nanmedian(matrix, axis=0)
+    # All-NaN column (100% missing feature): set neutral values
+    mean   = np.where(np.isnan(mean),   0.0,  mean)
+    std    = np.where(np.isnan(std),    1.0,  std)
+    median = np.where(np.isnan(median), mean, median)  # fallback to mean
+    return mean.astype(np.float32), (std + 1e-8).astype(np.float32), median.astype(np.float32)
 
 
 def _clean_clinical_features(feat_dict: dict) -> dict:
@@ -300,27 +308,37 @@ class BuildCTAd(MapTransform):
 
 
 class NormalizeClinicald(MapTransform):
-    """Z-normalise clinical features using training-set statistics."""
+    """Z-normalise clinical features using training-set statistics.
+
+    Missing values are filled with ``fill_value`` (in z-space).  Pass the
+    z-scored training median so imputed values reflect the typical patient
+    rather than the mean (more robust for skewed clinical distributions).
+    """
 
     def __init__(
         self,
         keys: list[str],
         mean: np.ndarray,
         std: np.ndarray,
+        fill_value: np.ndarray | None = None,
         eps: float = 1e-8,
     ) -> None:
         super().__init__(keys)
-        self.mean = torch.tensor(mean)
-        self.std  = torch.tensor(std)
-        self.eps  = eps
+        self.mean  = torch.tensor(mean)
+        self.std   = torch.tensor(std)
+        self.eps   = eps
+        self.fill_value = (
+            torch.tensor(fill_value) if fill_value is not None else None
+        )
 
     def __call__(self, data: dict) -> dict:
         clin = torch.as_tensor(data["clin"]).float()
         normalised = (clin - self.mean) / (self.std + self.eps)
-        # NaN (missing or sentinel-replaced values) → 0.0 = training mean in z-space.
-        # This is the most agnostic imputation: the feature contributes no signal
-        # for this patient, so the gate can safely zero it out.
-        data["clin"] = torch.nan_to_num(normalised, nan=0.0)
+        if self.fill_value is not None:
+            fill = self.fill_value.to(normalised.device)
+            data["clin"] = torch.where(torch.isnan(normalised), fill, normalised)
+        else:
+            data["clin"] = torch.nan_to_num(normalised, nan=0.0)
         return data
 
 
@@ -363,6 +381,7 @@ def get_train_runtime_transforms(
     clin_mean: np.ndarray,
     clin_std: np.ndarray,
     complications: list[str] | None = None,
+    clin_fill: np.ndarray | None = None,
 ) -> Compose:
     """Per-iteration augmentation + CTA build + normalisation.
 
@@ -412,7 +431,7 @@ def get_train_runtime_transforms(
         # ── build 4-channel CTA tensor ────────────────────────────────────────
         BuildCTAd(),
         ToTensord(keys=_tensor_keys(bool(complications))),
-        NormalizeClinicald(keys=["clin"], mean=clin_mean, std=clin_std),
+        NormalizeClinicald(keys=["clin"], mean=clin_mean, std=clin_std, fill_value=clin_fill),
     ])
 
 
@@ -420,12 +439,13 @@ def get_val_runtime_transforms(
     clin_mean: np.ndarray,
     clin_std: np.ndarray,
     complications: list[str] | None = None,
+    clin_fill: np.ndarray | None = None,
 ) -> Compose:
     """Deterministic val/test pipeline — no augmentation."""
     return Compose([
         BuildCTAd(),
         ToTensord(keys=_tensor_keys(bool(complications))),
-        NormalizeClinicald(keys=["clin"], mean=clin_mean, std=clin_std),
+        NormalizeClinicald(keys=["clin"], mean=clin_mean, std=clin_std, fill_value=clin_fill),
     ])
 
 
@@ -495,6 +515,7 @@ def build_loaders(
     size: tuple[int, int, int] = DEFAULT_SIZE,
     spacing: tuple[float, float, float] = DEFAULT_SPACING,
     seed: int = 3299,
+    clin_fill: np.ndarray | None = None,
 ) -> tuple[torch.utils.data.DataLoader, torch.utils.data.DataLoader]:
     """
     Build train and val DataLoaders.
@@ -510,8 +531,8 @@ def build_loaders(
     val_files   = build_data_list(splits["val"],   base_dir, config, feature_names, complications)
 
     cached_tfm = get_cached_transforms(size=size, spacing=spacing)
-    train_tfm  = get_train_runtime_transforms(clin_mean, clin_std, complications)
-    val_tfm    = get_val_runtime_transforms(clin_mean, clin_std, complications)
+    train_tfm  = get_train_runtime_transforms(clin_mean, clin_std, complications, clin_fill)
+    val_tfm    = get_val_runtime_transforms(clin_mean, clin_std, complications, clin_fill)
 
     train_ds = RuntimeDataset(
         CacheDataset(data=train_files, transform=cached_tfm,
