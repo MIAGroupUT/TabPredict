@@ -107,8 +107,10 @@ ai4evar/
 | Document | Contents |
 |---|---|
 | [Architecture](documentation/architecture.md) | Model branches, FiLM fusion, output heads, forward API |
+| [Models](documentation/models.md) | Tabular backbone comparison, projection inputs, imputation, per-backbone pipeline |
 | [Training](documentation/training.md) | 2-stage curriculum, loss functions, optimizer, modality dropout |
-| [Data](documentation/data.md) | Deepstore layout, clinical JSON, MONAI pipeline, preprocessing pipeline |
+| [Data](documentation/data.md) | Deepstore layout, clinical JSON, MONAI pipeline |
+| [Preprocessing](documentation/preprocessing.md) | Raw DICOM → training-ready data, step-by-step pipeline |
 | [Configuration](documentation/configuration.md) | Full YAML reference, all parameters explained |
 | [XAI](documentation/xai.md) | Explainability methods, `full_explain()` output, GradCAM |
 | [Evaluation](documentation/evaluation.md) | Inference, per-patient output files, all metrics |

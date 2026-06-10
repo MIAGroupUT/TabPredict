@@ -46,9 +46,11 @@ from sklearn.preprocessing import StandardScaler
 
 try:
     from xgboost import XGBClassifier as _XGBClassifier
+    from xgboost import DMatrix as _XGBDMatrix
     _XGB_AVAILABLE = True
 except ImportError:
     _XGB_AVAILABLE = False
+    _XGBDMatrix = None
 
 AVAILABLE: list[str] = ["lr", "rf", "gbm", "xgboost"]
 
@@ -179,10 +181,14 @@ class ClassicalBranchWrapper(nn.Module):
     """Drop-in replacement for MLP/TabM as the clinical_branch in
     ReinterventionRiskModel.
 
-    The sklearn/XGBoost model is non-differentiable; gradients only flow
-    through the learnable ``projection`` layer (Linear 1 → 32).  This lets
-    the FiLM fusion and prediction head adapt to the classical model's
-    probability output while the rest of the visual pipeline trains normally.
+    The sklearn/XGBoost model is non-differentiable; gradients flow only
+    through the learnable ``projection`` layer.  The projection input width
+    varies by model type to preserve richer structural information:
+
+    - ``lr``:      scalar positive-class probability → Linear(1→32)
+    - ``rf``:      per-tree positive-class probability (n_estimators,) → Linear(n_est→32)
+    - ``gbm``:     per-tree normalised leaf index (n_estimators,) → Linear(n_est→32)
+    - ``xgboost``: TreeSHAP values per input feature (in_features,) → Linear(n_feat→32)
 
     The sklearn model is fit *once* before Stage A using z-normalised clinical
     features + raw AAA scalars (same distribution as runtime inference).
@@ -200,7 +206,12 @@ class ClassicalBranchWrapper(nn.Module):
         self.model_type  = model_type
         self.in_features = in_features
         self.baseline    = TabularBaseline(model_type, **kwargs)
-        self.projection  = nn.Linear(1, 32)
+
+        merged  = {**_DEFAULTS.get(model_type, {}), **kwargs}
+        n_est   = int(merged.get('n_estimators', 300))
+        proj_in = {'lr': 1, 'rf': n_est, 'gbm': n_est, 'xgboost': in_features}.get(model_type, 1)
+
+        self.projection  = nn.Linear(proj_in, 32)
         self._fitted: bool = False
 
     # ── sklearn fit ───────────────────────────────────────────────────────────
@@ -208,27 +219,61 @@ class ClassicalBranchWrapper(nn.Module):
     def fit(self, X: np.ndarray, y: np.ndarray) -> None:
         """Fit the underlying TabularBaseline on pre-normalised tabular data."""
         self.baseline.fit(X, y)
+        if self.model_type == 'gbm':
+            # Pre-compute per-tree leaf-index scale; stored on baseline so
+            # joblib serialise() includes it automatically.
+            X_proc = self._preprocess(X)
+            clf    = self.baseline.pipeline.named_steps['clf']
+            leaves = clf.apply(X_proc).squeeze(-1).astype(np.float32)  # (N, n_est)
+            self.baseline._gbm_leaf_scale = leaves.max(axis=0).clip(min=1.0)
         self._fitted = True
+
+    # ── feature extraction ────────────────────────────────────────────────────
+
+    def _preprocess(self, X: np.ndarray) -> np.ndarray:
+        """Impute + StandardScaler — mirrors the sklearn pipeline prefix."""
+        X = self.baseline._impute(X, fit=False)
+        scaler = self.baseline.pipeline.named_steps.get('scaler')
+        if scaler is not None:
+            X = scaler.transform(X)
+        return X
+
+    def _extract_features(self, x_np: np.ndarray) -> np.ndarray:
+        """Return the richer representation fed into the projection layer."""
+        if self.model_type == 'lr':
+            return self.baseline.predict_proba(x_np)[:, np.newaxis].astype(np.float32)
+
+        x_proc = self._preprocess(x_np)
+        clf    = self.baseline.pipeline.named_steps['clf']
+
+        if self.model_type == 'rf':
+            # Per-tree positive-class probability → (B, n_estimators)
+            return np.column_stack([
+                tree.predict_proba(x_proc)[:, 1] for tree in clf.estimators_
+            ]).astype(np.float32)
+
+        if self.model_type == 'gbm':
+            # Normalised leaf node indices → (B, n_estimators)
+            leaves = clf.apply(x_proc).squeeze(-1).astype(np.float32)
+            return leaves / self.baseline._gbm_leaf_scale
+
+        if self.model_type == 'xgboost':
+            # TreeSHAP values → (B, n_features); drop bias column
+            dm   = _XGBDMatrix(x_proc)
+            shap = clf.get_booster().predict(dm, pred_contribs=True).astype(np.float32)
+            return shap[:, :-1]
+
+        return self.baseline.predict_proba(x_np)[:, np.newaxis].astype(np.float32)
 
     # ── nn.Module forward ─────────────────────────────────────────────────────
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: (B, in_features) — raw clinical (already z-normalised by the
-               DataLoader, NaN→0) concatenated with raw AAA scalars
-        Returns:
-            (B, 32) — learnable projection of the classical model's probability
-        """
         if not self._fitted:
-            # Safety: return zeros before fit is called (should not occur in
-            # normal training flow since fit_classical_backbone runs first)
             return torch.zeros(x.shape[0], 32, device=x.device, dtype=x.dtype)
-
         x_np   = x.detach().cpu().float().numpy()
-        probs  = self.baseline.predict_proba(x_np)                       # (B,)
-        prob_t = torch.as_tensor(probs, dtype=x.dtype, device=x.device).unsqueeze(1)  # (B,1)
-        return self.projection(prob_t)                                    # (B,32)
+        feat   = self._extract_features(x_np)
+        feat_t = torch.as_tensor(feat, dtype=x.dtype, device=x.device)
+        return self.projection(feat_t)
 
     # ── checkpoint serialisation ──────────────────────────────────────────────
 

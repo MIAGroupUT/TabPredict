@@ -30,10 +30,10 @@ The **L1 feature gate** sits between the transform and the backbone for differen
 | `tabm` | `TabMEmbed` | ✓ | ✓ | DataLoader (NaN→z-median) | Built-in (→32) | Stage A + B | k×mlp_params + PeriodicEmbed |
 | `saint` | `SAINTEmbed` | ✓ | ✓ | DataLoader (NaN→z-median) | Built-in (→32) | Stage A + B | ~66k (col) / ~850k (colrow) |
 | `tabpfn` | `TabPFNBranchWrapper` | Partial* | ✓ | DataLoader (NaN→z-median) | `Linear(n_est×2→32)` | Phase 1 pre-A + Phase 2 A+B | 288 (projection) + last-N blocks |
-| `lr` | `ClassicalBranchWrapper` | ✗ | ✗ | Median (TabularBaseline) | `Linear(1→32)` | Before Stage A | 1 (projection) |
-| `rf` | `ClassicalBranchWrapper` | ✗ | ✗ | Median (TabularBaseline) | `Linear(1→32)` | Before Stage A | 1 (projection) |
-| `gbm` | `ClassicalBranchWrapper` | ✗ | ✗ | Median (TabularBaseline) | `Linear(1→32)` | Before Stage A | 1 (projection) |
-| `xgboost` | `ClassicalBranchWrapper` | ✗ | ✗ | **None** (native NaN splits) | `Linear(1→32)` | Before Stage A | 1 (projection) |
+| `lr` | `ClassicalBranchWrapper` | ✗ | ✗ | Median (TabularBaseline) | `Linear(1→32)` | Before Stage A | ~32 (projection) |
+| `rf` | `ClassicalBranchWrapper` | ✗ | ✗ | Median (TabularBaseline) | `Linear(n_est→32)` | Before Stage A | ~9.6k (projection) |
+| `gbm` | `ClassicalBranchWrapper` | ✗ | ✗ | Median (TabularBaseline) | `Linear(n_est→32)` | Before Stage A | ~9.6k (projection) |
+| `xgboost` | `ClassicalBranchWrapper` | ✗ | ✗ | **None** (native NaN splits) | `Linear(n_feat→32)` | Before Stage A | ~1.5k (projection) |
 
 *Last `n_trainable_layers` (default 2) transformer blocks trainable; remainder frozen.
 
@@ -43,7 +43,20 @@ The **L1 feature gate** sits between the transform and the backbone for differen
 
 **Differentiable backbones (mlp / tabm / saint):** The 32-dim output is a design choice baked into the backbone architecture itself. The final `nn.Linear` of the backbone *is* the projection — no separate layer is needed.
 
-**Classical backbones (lr / rf / gbm / xgboost):** The sklearn/XGBoost model is non-differentiable. Its only output is a scalar `predict_proba` ∈ [0, 1]. A separate `Linear(1→32)` maps this scalar into the 32-dim fusion space. This is the *only* trainable component of the branch during Stage A + B — it lets gradients reach the FiLM fusion while the tree/linear model stays frozen.
+**Classical backbones (lr / rf / gbm / xgboost):** The sklearn/XGBoost model is non-differentiable; its output is extracted as a structured representation and projected into the 32-dim fusion space. The projection is the *only* trainable component during Stage A + B.
+
+Each model exposes a different input to the projection:
+
+| Model | Representation | Shape | Projection |
+|-------|---------------|-------|------------|
+| `lr` | Scalar positive-class probability from `predict_proba` | `(B, 1)` | `Linear(1→32)` |
+| `rf` | Per-tree positive-class probability (`tree.predict_proba(X)[:,1]` for each estimator) | `(B, n_estimators)` | `Linear(n_est→32)` |
+| `gbm` | Per-tree leaf node index normalised by tree max (`clf.apply(X)` / max_per_tree) | `(B, n_estimators)` | `Linear(n_est→32)` |
+| `xgboost` | TreeSHAP values per input feature (`predict(X, pred_contribs=True)[:,:-1]`, bias dropped) | `(B, n_features)` | `Linear(n_feat→32)` |
+
+This preserves ensemble diversity (rf/gbm) and per-feature attribution signal (xgboost) rather than collapsing to a single probability. `lr` stays scalar since it has no ensemble structure to expose.
+
+The GBM leaf scale (`max_per_tree`) is computed from the training set during `fit()` and stored on the `TabularBaseline` object so `joblib.dump` serialises it into the checkpoint alongside the sklearn model.
 
 **TabPFN:** Produces `(n_estimators, B, n_classes)` raw logits — one pair of class logits per estimator, before softmax. Flattened to `(B, n_estimators × 2)` and projected with `Linear(n_est×2→32)`. The richer input vs. a scalar probability preserves ensemble diversity: each estimator used a different random preprocessing seed, so differences in logit magnitude and sign carry genuine signal.
 

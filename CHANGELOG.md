@@ -13,6 +13,37 @@ _No unreleased changes._
 
 ---
 
+## [2026-06-10] — Richer classical projections; RF/GBM/XGBoost reruns; docs index → Checkpointing 10062026
+
+### Added
+
+- **`documentation/README.md`** — new navigation index for the `documentation/` folder: quick-start routing guide ("new to the project? → Architecture → Training → Data"), grouped index table for all 11 docs, and a key-numbers quick-reference block.
+- **`ClassicalBranchWrapper._preprocess()`** — new helper applying `_impute()` + `StandardScaler.transform()`, mirroring the sklearn pipeline prefix. Shared by `_extract_features()` and GBM leaf scale computation at fit time.
+- **`ClassicalBranchWrapper._extract_features()`** — new method dispatching per `model_type` to return the richer representation fed into the projection layer.
+
+### Changed
+
+- **`ClassicalBranchWrapper`** projection input is no longer a single scalar for tree models. Each backbone now exposes a structurally richer representation:
+  - **`rf`**: per-tree positive-class probability `(B, n_estimators)` → `Linear(300→32)` (was `Linear(1→32)`)
+  - **`gbm`**: per-tree normalised leaf node index `(B, n_estimators)` → `Linear(300→32)` (was `Linear(1→32)`)
+  - **`xgboost`**: TreeSHAP values per input feature `(B, n_features)` → `Linear(n_feat→32)` (was `Linear(1→32)`)
+  - **`lr`**: unchanged — scalar `predict_proba` `(B, 1)` → `Linear(1→32)`
+- **`ClassicalBranchWrapper.fit()`** — GBM path now computes `_gbm_leaf_scale` (per-tree max leaf index, clipped to ≥ 1.0) from training data and stores it on `baseline` so `joblib.dump` serialises it into the checkpoint automatically.
+- **`experiments/v1_random_forest.yaml`** — `run_name` / `checkpoint_dir` updated `04062026` → `10062026`; job 512483 submitted (first run with `Linear(300→32)` RF projection).
+- **`experiments/v1_gradient_boosting.yaml`** — `08062026` → `10062026`; job 512484 replaces stale run 512463 (which used old `Linear(1→32)`).
+- **`experiments/v1_xgboost.yaml`** — `08062026` → `10062026`; job 512485 submitted (first run with SHAP `Linear(n_feat→32)` projection).
+- **`documentation/models.md`** — projection section rewritten with a per-model representation table (shape, method, projection); comparison table updated with corrected projection widths and param counts; GBM leaf scale serialisation note added.
+- **`README.md`** — documentation table: `models.md` and `preprocessing.md` added as explicit rows.
+
+### Tests
+
+- `test_wrapper_projection_receives_gradients` docstring updated (removed stale `Linear(1→32)` reference).
+- **`test_wrapper_projection_width`** — new parametrised test asserting `projection.in_features` matches per-model expected width (`lr=1`, `rf=300`, `gbm=300`, `xgboost=N_FEAT`).
+- **`test_gbm_leaf_scale_stored_after_fit`** — asserts `_gbm_leaf_scale` exists on `baseline`, shape `(300,)`, all ≥ 1.0.
+- **`test_extract_features_shape`** — asserts `_extract_features()` returns `(B, expected_cols)` float32 for lr / rf / gbm.
+
+---
+
 ## [2026-06-10] — Differentiable TabPFN; models.md; GBM run; fix checkpoint deserialization → Checkpointing 10062026
 
 ### Added

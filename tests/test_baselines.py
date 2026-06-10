@@ -198,7 +198,7 @@ def test_wrapper_forward_after_fit(model_type, tabular_data):
 
 @pytest.mark.parametrize("model_type", _MODELS_TO_TEST)
 def test_wrapper_projection_receives_gradients(model_type, tabular_data):
-    """Gradients must flow through the Linear(1→32) projection layer."""
+    """Gradients must flow through the projection layer."""
     from src.models.baselines import ClassicalBranchWrapper
     X_tr, y_tr, X_va, _ = tabular_data
     wrapper = ClassicalBranchWrapper(in_features=N_FEAT, model_type=model_type)
@@ -288,6 +288,54 @@ def test_fit_classical_backbone_forward_no_zeros(model_type):
     assert out.shape == (2, 32)
     # After fitting projection weights are random-init, output won't be all zeros
     assert not torch.all(out == 0)
+
+
+# ── projection width per model type ──────────────────────────────────────────
+
+_PROJ_IN_EXPECTED = [
+    ("lr",      1),
+    ("rf",      300),
+    ("gbm",     300),
+    ("xgboost", N_FEAT),
+]
+
+@pytest.mark.parametrize("model_type,expected_proj_in", [
+    (m, p) for m, p in _PROJ_IN_EXPECTED if m != "xgboost" or _XGB_AVAILABLE
+])
+def test_wrapper_projection_width(model_type, expected_proj_in):
+    """Projection input width must match the per-model representation size."""
+    from src.models.baselines import ClassicalBranchWrapper
+    wrapper = ClassicalBranchWrapper(in_features=N_FEAT, model_type=model_type)
+    assert wrapper.projection.in_features == expected_proj_in
+    assert wrapper.projection.out_features == 32
+
+
+def test_gbm_leaf_scale_stored_after_fit(tabular_data):
+    """After fit(), GBM leaf scale must be stored on baseline and have shape (n_estimators,)."""
+    from src.models.baselines import ClassicalBranchWrapper
+    X_tr, y_tr, _, _ = tabular_data
+    wrapper = ClassicalBranchWrapper(in_features=N_FEAT, model_type='gbm')
+    wrapper.fit(X_tr, y_tr)
+    assert hasattr(wrapper.baseline, '_gbm_leaf_scale')
+    scale = wrapper.baseline._gbm_leaf_scale
+    assert scale.shape == (300,)
+    assert (scale >= 1.0).all()
+
+
+@pytest.mark.parametrize("model_type,expected_cols", [
+    ("lr",  1),
+    ("rf",  300),
+    ("gbm", 300),
+])
+def test_extract_features_shape(model_type, expected_cols, tabular_data):
+    """_extract_features must return (B, expected_cols) float32 array."""
+    from src.models.baselines import ClassicalBranchWrapper
+    X_tr, y_tr, X_va, _ = tabular_data
+    wrapper = ClassicalBranchWrapper(in_features=N_FEAT, model_type=model_type)
+    wrapper.fit(X_tr, y_tr)
+    feat = wrapper._extract_features(X_va)
+    assert feat.shape == (N_VAL, expected_cols)
+    assert feat.dtype == np.float32
 
 
 # ── imputation behaviour per model type ──────────────────────────────────────
