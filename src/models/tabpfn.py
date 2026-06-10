@@ -3,31 +3,37 @@ TabPFNBranchWrapper — TabPFN pretrained tabular backbone for ReinterventionRis
 
 TabPFN (Prior-Labs, Nature 2024) is a transformer pretrained on millions of synthetic
 tabular datasets via meta-learning.  At inference it performs in-context learning:
-the training set is the context; prediction is a single forward pass.  No gradient
-flows through the backbone — it is fitted once before Stage A and then frozen.
+the training set is the context; prediction is a single forward pass.
 
-Pretrained weights: downloaded automatically to ~/.cache/tabpfn/ from
-HuggingFace (Prior-Labs/TabPFN-v2-clf) on first use.  Set HTTPS_PROXY if behind
-a corporate proxy (e.g. export HTTPS_PROXY=http://proxy.utwente.nl:3128).
+Fine-tuning strategy (two phases):
+  Phase 1 — pre-Stage A: FinetunedTabPFNClassifier meta-learning fine-tune at lr=1e-5.
+    Adapts the full transformer to EVAR task structure via a meta-learning objective
+    (context + query splits within the training set).  Early stopping on an internal
+    10 % validation split (patience=5, ~20 epochs max).
 
-Fine-tuning strategy (built-in, no LoRA needed):
-  FinetunedTabPFNClassifier does full weight fine-tuning at lr=1e-5 — very
-  conservative, preserves pretrained in-context priors.  Uses a meta-learning
-  objective: splits training samples into context + query per step and trains
-  the transformer to predict query labels from context examples.
-  Early stopping on an internal 10 % validation split (patience=5, ~20 epochs max).
+  Phase 2 — Stage A + B: Last ``n_trainable_layers`` transformer blocks remain
+    trainable; all other TabPFN weights are frozen.  Gradients flow through the
+    unfrozen blocks and the learnable projection layer.
+    The L1 feature gate is also trained because the backbone is differentiable
+    (_is_non_differentiable = False).
+
+Differentiable forward:
+  TabPFNClassifier exposes ``differentiable_input=True`` + ``fit_with_differentiable_input``
+  which sets up an InferenceEngineCachePreprocessing with inference_mode=False.
+  Calling ``forward(..., use_inference_mode=True)`` on such a classifier sets
+  ``actual_inference_mode = use_inference_mode and not differentiable_input = False``,
+  meaning torch.inference_mode() is NOT entered — gradients are preserved through
+  the unfrozen layers.
 
 Projection:
-  predict_raw_logits() returns per-estimator unnormalised logits with shape
-  (n_estimators, n_samples, n_classes).  These are transposed to
-  (n_samples, n_estimators * n_classes) and fed into a learnable
-  Linear(n_estimators * n_classes → out_dim) projection.
+  forward() returns per-estimator raw logits shape (n_estimators, B, n_classes).
+  These are permuted to (B, n_estimators * n_classes) and fed into a learnable
+  Linear(n_estimators * n_classes → out_dim).
 
   With n_estimators_final_inference=4 and binary classification:
-    projection input = 4 × 2 = 8  (vs. 1 for a scalar probability)
-  Each estimator used a different random preprocessing seed, so the 8 values
-  carry genuine diversity — differences in logit magnitude and sign across
-  estimators are meaningful signal for the downstream fusion head.
+    projection input = 4 × 2 = 8
+  Each estimator uses a different random preprocessing seed, so the 8 values
+  carry genuine diversity across the ensemble.
 
 Contract
 --------
@@ -59,29 +65,36 @@ _N_CLASSES = 2   # binary classification throughout this project
 class TabPFNBranchWrapper(nn.Module):
     """Drop-in clinical branch using TabPFN as the tabular encoder.
 
-    Satisfies the branch contract ``(B, in_features) → (B, out_dim)``.  The
-    TabPFN model is non-differentiable; gradients only flow through the learnable
-    ``projection`` layer (Linear(n_estimators*2 → out_dim)), allowing the FiLM
-    fusion and prediction head to adapt while the pretrained transformer stays frozen.
+    Satisfies the branch contract ``(B, in_features) → (B, out_dim)``.
 
-    Setting ``_is_non_differentiable = True`` causes ``is_classical_backbone()``
-    to return True, which skips the L1 feature gate and its param group in the
-    optimizer — consistent with the sklearn classical backends.
+    Phase 1: FinetunedTabPFNClassifier meta-learning fine-tune adapts the
+    pretrained transformer to the EVAR task before Stage A begins.
+
+    Phase 2: The last ``n_trainable_layers`` encoder/decoder blocks stay
+    trainable during Stage A and B; the rest are frozen.  Gradients flow
+    through these blocks and the learnable ``projection`` layer.
+
+    ``_manages_own_grad = True`` signals stages.py to not override the
+    per-layer requires_grad flags set by ``_setup_diff_mode()``.
 
     Args:
         in_features:                 clinical_dim + aaa_dim (total tabular width).
         out_dim:                     output embedding size (32 to match FiLM fusion).
-        epochs:                      fine-tuning epochs (early stopping may trigger first).
-        learning_rate:               AdamW lr for fine-tuning (1e-5 preserves priors).
+        epochs:                      fine-tuning epochs for phase 1.
+        learning_rate:               AdamW lr for phase 1 fine-tuning (1e-5 preserves priors).
         early_stopping_patience:     epochs without val improvement before stopping.
         n_estimators_final_inference: TabPFN ensemble size at inference.
-                                     Projection input = n_estimators * 2 (both logits
-                                     per estimator before softmax / averaging).
+        n_trainable_layers:          last N encoder/decoder blocks to keep trainable
+                                     during Stage A + B (default 2).  Set 0 for
+                                     projection-only training.
         random_state:                reproducibility seed.
         device:                      'cuda' / 'cpu'; auto-detected when None.
+        model_dir:                   path to directory with tabpfn-v2.5-classifier*.ckpt
+                                     files; uses HuggingFace cache when None.
     """
 
-    _is_non_differentiable: bool = True   # read by is_classical_backbone()
+    _is_non_differentiable: bool = False  # differentiable → feature gate trained
+    _manages_own_grad: bool = True        # stages.py must not clobber per-layer grad flags
 
     def __init__(
         self,
@@ -91,6 +104,7 @@ class TabPFNBranchWrapper(nn.Module):
         learning_rate: float = 1e-5,
         early_stopping_patience: int = 5,
         n_estimators_final_inference: int = 4,
+        n_trainable_layers: int = 2,
         random_state: int = 42,
         device: str | None = None,
         model_dir: str | None = None,
@@ -101,6 +115,7 @@ class TabPFNBranchWrapper(nn.Module):
 
         self.in_features = in_features
         self.n_estimators = n_estimators_final_inference
+        self.n_trainable_layers = n_trainable_layers
         _device = device or ("cuda" if torch.cuda.is_available() else "cpu")
 
         extra: dict = {}
@@ -139,13 +154,43 @@ class TabPFNBranchWrapper(nn.Module):
         # n_estimators * n_classes raw logits before any averaging or softmax
         self.projection = nn.Linear(n_estimators_final_inference * _N_CLASSES, out_dim)
         self._fitted: bool = False
+        self._diff_clf = None  # set by _setup_diff_mode() after fit()
 
     # ── fit (called once by fit_classical_backbone before Stage A) ────────────
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> None:
-        """Fine-tune TabPFN on z-normalised clinical + raw AAA features."""
+        """Phase 1 meta-learning fine-tune, then set up differentiable inference."""
         self._clf.fit(X, y)
+        self._setup_diff_mode()
         self._fitted = True
+
+    def _setup_diff_mode(self) -> None:
+        """Configure differentiable inference from fitted _clf.
+
+        Sets differentiable_input=True on the inference classifier, re-initialises
+        its executor with inference_mode=False (preserves autograd), then freezes all
+        TabPFN model params except the last n_trainable_layers encoder/decoder blocks.
+        """
+        diff_clf = self._clf.finetuned_inference_classifier_
+        diff_clf.differentiable_input = True
+
+        X_t = torch.as_tensor(self._clf.X_, dtype=torch.float32)
+        y_t = torch.as_tensor(self._clf.y_, dtype=torch.long)
+        diff_clf.fit_with_differentiable_input(X_t, y_t)
+
+        # Freeze everything, then selectively unfreeze last N blocks
+        for m in diff_clf.models_:
+            for p in m.parameters():
+                p.requires_grad_(False)
+            if self.n_trainable_layers > 0:
+                # Use decoder if present (it produces the test-sample logits),
+                # else fall back to the encoder's last layers
+                stack = getattr(m, "transformer_decoder", None) or m.transformer_encoder
+                for layer in stack.layers[-self.n_trainable_layers:]:
+                    for p in layer.parameters():
+                        p.requires_grad_(True)
+
+        self._diff_clf = diff_clf
 
     # ── nn.Module forward ─────────────────────────────────────────────────────
 
@@ -160,16 +205,16 @@ class TabPFNBranchWrapper(nn.Module):
             return torch.zeros(x.shape[0], self.projection.out_features,
                                device=x.device, dtype=x.dtype)
 
-        x_np = x.detach().cpu().float().numpy()
+        # differentiable_input=True means actual_inference_mode = False inside
+        # TabPFNClassifier.forward(), so torch.inference_mode() is never entered
+        # and gradients flow through the unfrozen last N layers.
+        raw = self._diff_clf.forward(
+            x, use_inference_mode=True, return_raw_logits=True
+        )
 
-        # (E, B, C) — raw unnormalised logits, one row per estimator
-        raw = self._clf.finetuned_inference_classifier_.predict_raw_logits(x_np)
-
-        # (B, E*C) — flatten estimator and class axes into a single feature vector
-        feat = raw.transpose(1, 0, 2).reshape(len(x_np), -1)
-        feat_t = torch.as_tensor(feat, dtype=x.dtype, device=x.device)
-
-        return self.projection(feat_t)   # (B, out_dim)
+        # raw: (n_estimators, B, n_classes) → (B, n_estimators * n_classes)
+        feat = raw.permute(1, 0, 2).reshape(x.shape[0], -1)
+        return self.projection(feat)
 
     # ── checkpoint serialisation ──────────────────────────────────────────────
 
@@ -179,6 +224,12 @@ class TabPFNBranchWrapper(nn.Module):
         joblib.dump(self._clf, buf)
         return buf.getvalue()
 
-    @staticmethod
-    def deserialize(data: bytes) -> "FinetunedTabPFNClassifier":
-        return joblib.load(io.BytesIO(data))
+    def restore_from_bytes(self, data: bytes) -> None:
+        """Restore fitted _clf and re-establish differentiable mode.
+
+        Called by load_checkpoint() in reintervention.py after loading a
+        checkpoint that contains 'classical_baseline_bytes'.
+        """
+        self._clf = joblib.load(io.BytesIO(data))
+        self._setup_diff_mode()
+        self._fitted = True

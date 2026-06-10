@@ -108,8 +108,13 @@ def set_stage_a(model: nn.Module) -> None:
     # bypasses it), so enabling it would create a zero-gradient parameter.
     if not is_classical_backbone(model):
         model.feature_gate.requires_grad = True
-    for p in model.clinical_branch.parameters():
-        p.requires_grad = True
+    if not getattr(model.clinical_branch, "_manages_own_grad", False):
+        for p in model.clinical_branch.parameters():
+            p.requires_grad = True
+    elif hasattr(model.clinical_branch, "projection"):
+        # Branch manages its own per-layer grad flags (_setup_diff_mode already ran);
+        # only ensure the projection head is trainable.
+        model.clinical_branch.projection.requires_grad_(True)
     for p in model.condition_net.parameters():
         p.requires_grad = True
     for p in model.fusion_norm.parameters():
@@ -139,8 +144,11 @@ def set_stage_b(model: nn.Module) -> None:
     # Tabular + fusion — continue from Stage A at lower LR
     if not is_classical_backbone(model):
         model.feature_gate.requires_grad = True
-    for p in model.clinical_branch.parameters():
-        p.requires_grad = True
+    if not getattr(model.clinical_branch, "_manages_own_grad", False):
+        for p in model.clinical_branch.parameters():
+            p.requires_grad = True
+    elif hasattr(model.clinical_branch, "projection"):
+        model.clinical_branch.projection.requires_grad_(True)
     for p in model.condition_net.parameters():
         p.requires_grad = True
     for p in model.fusion_norm.parameters():

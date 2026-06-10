@@ -136,6 +136,146 @@ See [W&B Integration](wandb.md) for table names and logging frequency.
 
 ---
 
+## Technical Implementation
+
+### Confidence — formula and calibration
+
+```python
+reint_conf = 2.0 * abs(reint_prob - 0.5)
+```
+
+Confidence is the **absolute distance from the decision boundary** (0.5), scaled so it spans [0, 1]. It is **self-calibrating** — no post-hoc temperature scaling or Platt scaling is applied (temperature defaults to 1.0 unless passed explicitly). The model's probability is therefore used as-is from `sigmoid(logit)`.
+
+| prob | confidence | level |
+|------|-----------|-------|
+| 0.95 | 0.90 | HIGH |
+| 0.75 | 0.50 | MED |
+| 0.55 | 0.10 | LOW |
+| 0.50 | 0.00 | LOW |
+
+Level thresholds: HIGH > 0.6, MED > 0.3, LOW ≤ 0.3.
+
+---
+
+### GradCAM — step-by-step
+
+Target layer: **`I3ResNet.layer4[-1]`** — the last residual block of the last ResNet stage inside the Merlin backbone. This is found dynamically by `_get_i3res()`, which walks `model.visual_branch.named_modules()` looking for a module that has both `layer1` and `layer4` attributes (handles LoRA/PEFT wrapping transparently).
+
+**Gradient checkpointing patch**
+
+Gradient checkpointing is active during training to reduce memory. It breaks gradient flow by re-running the forward pass segment during backward instead of storing activations. GradCAM needs activations **and** their gradients at the same time, so before the forward pass the checkpointing function is monkey-patched to a no-op:
+
+```python
+cp_mod.checkpoint = lambda fn, *args, **kwargs: fn(*args)
+```
+
+This is restored in the `finally` block regardless of errors.
+
+**Forward hook**
+
+A hook is registered on the target layer before the forward pass:
+
+```python
+def fwd_hook(module, inp, out):
+    store["feat"] = out        # activations: shape [B, C, D, H, W]
+    if out.requires_grad:
+        out.retain_grad()      # prevent intermediate grad from being freed
+```
+
+**Backward**
+
+```python
+out[0].sum().backward()  # grad w.r.t. sum of reintervention logits
+```
+
+This computes `∂ logit / ∂ feat` via automatic differentiation. Using `.sum()` for a batch of 1 is equivalent to `.squeeze().backward()`.
+
+**Weight computation and CAM**
+
+```python
+weights = grads.mean(dim=(2, 3, 4), keepdim=True)  # global spatial average per channel
+cam = torch.relu((weights * acts).sum(dim=1, keepdim=True))
+```
+
+- `weights` shape: `[B, C, 1, 1, 1]` — one scalar weight per channel, computed as the mean gradient across all spatial positions. This is the global average pooling step from the original GradCAM paper.
+- `(weights * acts).sum(dim=1)` — weighted sum across channels, producing `[B, 1, D', H', W']` where D'×H'×W' is the spatial resolution of layer4 (much smaller than the input).
+- `ReLU` zeroes negative values — only regions that **increase** the logit are retained.
+
+**Upsampling and normalisation**
+
+```python
+cam_up = F.interpolate(cam, size=cta.shape[2:], mode="trilinear", align_corners=False)
+cam_np = cam_up.squeeze().numpy()
+cam_np = (cam_np - cam_np.min()) / (cam_np.max() - cam_np.min() + 1e-8)
+```
+
+Trilinear upsampling back to the full CTA volume size (224×224×160). Min-max normalisation maps to [0, 1]. The `1e-8` epsilon prevents division-by-zero for flat CAMs (all zeros → returns zeros).
+
+**Rendering**
+
+Slices are taken at the volume centre along each axis (D//2, H//2, W//2). The data is in RAS orientation (`Orientationd(axcodes='RAS')`), so axes are: 0=R, 1=A, 2=S. Each 2D slice is anatomically oriented via `flipud(T)` before display.
+
+Overlay layers (in render order):
+1. CT: gray colormap, `vmin=0 vmax=1` (HU-clipped and normalised during preprocessing)
+2. GradCAM: jet colormap, `alpha=0.4`
+3. Lumen mask: RGBA cyan `[0, 1, 1, 0.35]`
+4. ILT mask: RGBA yellow `[1, 1, 0, 0.35]`
+
+---
+
+### Clinical & AAA gradient importance — limitations
+
+Both methods use **input-gradient saliency**: the magnitude of `∂ sigmoid(logit) / ∂ input_i`. Key properties:
+
+- **Local**: computed at a single input point. A nearby input with the same clinical values could have a different gradient if the model's decision surface is nonlinear.
+- **First-order only**: does not capture non-linear interactions between features. If two features interact multiplicatively, neither individually may show high gradient.
+- **Magnitude only, not direction**: a HIGH-impact feature could be pushing probability **up or down**. The sign of the gradient is not reported. To get direction you would need `clin_var.grad[i]` (signed), not `abs()`.
+- **Not normalised across patients**: scores are normalised within a single call (divided by that call's max gradient). A score of 0.8 for patient A is not comparable to 0.8 for patient B.
+
+---
+
+### Modality importance — ablation vs gradient
+
+Unlike clinical/AAA importance, modality importance uses **zero-ablation**, not gradients. Zero-ablation replaces an entire modality's input tensor with zeros and measures the absolute probability shift.
+
+This is more informative for **modality-level** attribution because:
+- Gradients w.r.t. a high-dimensional input (CTA: 4×224×224×160 ≈ 36M values) would need to be aggregated somehow — any aggregation introduces choices.
+- Zero-ablation directly answers "what does the model do without this input?" in a model-agnostic way.
+
+**Caveat**: replacing CTA with zeros ≠ "CTA is missing". Zero is a specific value (HU=0 after clipping/normalising, roughly water density). The model has not been trained with masked CTA inputs, so its output under this perturbation reflects learned behaviour at an out-of-distribution input. The ablation impact is a proxy for modality contribution, not a causal estimate.
+
+---
+
+### Causal chain — template logic, not learned
+
+The causal chain string is **not generated by a language model**. It is a deterministic template filled with values from the other XAI outputs:
+
+```
+Slots:
+  top_clin  = clin_imp[0][0]          (highest-gradient clinical feature name)
+  top_mod   = argmax(modality_imp)     (dominant modality by ablation fraction)
+  reint_prob                           (from sigmoid output)
+  top_comps = sorted comp_probs descending, filtered to > 0.15, top 3
+              (multi-task model only)
+```
+
+Template selection (no-complications model):
+```
+if reint_prob > 0.5:
+    "Elevated <top_clin> detected by <top_mod> → likely reintervention needed (<reint_prob>%)"
+else:
+    "<top_clin> via <top_mod> — monitoring advised, low reintervention risk (<reint_prob>%)"
+```
+
+Template selection (complications model, reint_prob > 0.5):
+```
+"Elevated <top_clin> via <top_mod> → probable complications: <comp1> (X%, CONF), ... → likely reintervention (Y%)"
+```
+
+**Implication**: the causal chain is only as good as the gradient-based top clinical feature and the ablation-based top modality. If those are noisy or unintuitive, the narrative will be too.
+
+---
+
 ## Usage at Inference
 
 `scripts/test.py` runs `full_explain()` on every patient in the evaluation split and saves results to the output directory:

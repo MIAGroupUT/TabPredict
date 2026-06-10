@@ -41,7 +41,7 @@ Clinical tabular (~42 features, z-normalised, filtered from 240 raw)         │
 | Adaptation | Stage B unfreezes BatchNorm γ/β in I3ResNet `layer3` and `layer4` (~50 K params); recalibrates feature statistics for scanner-type variation |
 | `visual_proj` | `Linear(2048, 256)` — projects to shared embedding dimension |
 
-The 4-channel CTA input concatenates: CT intensity · lumen segmentation mask · ILT segmentation mask · distance map (see [Data](data.md) for how this is assembled).
+The 4-channel CTA input concatenates: CT intensity · lumen segmentation mask · ILT mask · lumen-to-wall distance map (see [Data](data.md) for runtime assembly; see [Preprocessing step 05](preprocessing.md#step-05--nnunet-segmentation--aaa-metrics-05_nnunet_labels_metrics_generationpy) for how the segmentation masks and distance map are produced from raw CT).
 
 ### Tabular Branch (Clinical + AAA Metrics)
 
@@ -67,6 +67,8 @@ volume_total_ml
 max_lumen_to_wall_dist_mm
 avg_lumen_to_wall_dist_mm
 ```
+
+Derived from nnUNet segmentation masks by `preprocessing/case_matching_v1/05_nnUNet_labels_metrics_generation.py`. See [Preprocessing step 05](preprocessing.md#step-05--nnunet-segmentation--aaa-metrics-05_nnunet_labels_metrics_generationpy) for the exact formulas (voxel volumes, distance transform). Loaded at runtime from `metricsTr/{stem}.json`; missing keys default to 0.0.
 
 #### TabM backbone (optional)
 

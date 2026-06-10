@@ -87,28 +87,35 @@ sbatch \
 
 ## Data Preparation Jobs
 
-The preprocessing pipeline is run via `data/prepare_data.sh`. Scripts must run in order:
+Scripts live in `preprocessing/case_matching_v1/` and must be run in order (00 → 07).
+See **[Preprocessing](preprocessing.md)** for the full technical description of each step.
 
 ```bash
-sbatch data/prepare_data.sh
-```
+cd /home/ranema/AI4EVAR/ai4evar/preprocessing/case_matching_v1
 
-Or individually:
+# Step 00 — DICOM → NIfTI (all sessions, all sites)
+python 00_dicom_to_nifti_renaming.py
 
-```bash
-cd /home/ranema/AI4EVAR/ai4evar/preprocessing/case_matching
+# Step 01 — Build session index JSON
+python 01_build_session_index.py
 
-# Step 3 — match images to clinical records (also produces analysis .txt)
-python -m 03_data_matching_v1
+# Step 02 — Rename CFD meshes to match NIfTI naming
+python 02_cfd_name_cleaning.py
 
-# Step 4 — organise into training_subset_v1/
-python -m 04_data_organizing
+# Step 03 — Match imaging sessions to SPSS clinical records
+python 03_data_matching_v1.py
 
-# Step 5 — nnUNet segmentation + AAA metrics
-python -m 05_nnUNet_labels_metrics_generation
+# Step 04 — Organise NIfTIs into training_subset_v1/
+python 04_data_organizing.py
 
-# Step 6 — stratified train/val/test split
-python -m 06_generate_data_split
+# Step 05 — nnUNet segmentation + distance maps + AAA metrics
+python 05_nnUNet_labels_metrics_generation.py
+
+# Step 06 — Crop full-body scans to aortic region
+python 06_crop_full_body_scans.py
+
+# Step 07 — Stratified train/val/test split
+python 07_generate_data_split.py
 ```
 
 ---

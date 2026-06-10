@@ -227,39 +227,19 @@ Mean and std are computed from the training split only (`compute_clin_stats`) an
 
 ## Preprocessing Pipeline
 
-Scripts in `preprocessing/case_matching/` must be run in order. They are designed to run on the HPC via `data/prepare_data.sh`.
+Scripts live in `preprocessing/case_matching_v1/` and must be run in order (00 → 07).
 
-### Step-by-step
+For the full technical walkthrough of every step — DICOM series scoring, session index structure, SPSS matching, pre/post-op classification, nnUNet segmentation, distance map computation, full-body crop logic, and stratified split generation — see **[Preprocessing](preprocessing.md)**.
 
-| Script | Purpose |
-|---|---|
-| `00_dicom_to_nifti_renaming.py` | Converts DICOM series to NIfTI and renames files to `<id>_<site>.nii.gz` |
-| `01_cfd_name_cleaning.py` | Standardises CFD `.vtp` filenames to match the RADAR patient ID format |
-| `02_umcg_name_cleaning.py` | Site-specific name fixing for UMCG files (different ID convention) |
-| `03_data_matching_v1.py` | **Main matching script** — joins image files to SPSS clinical records; outputs `radar_multimodal_config_v1.json` and `radar_multimodal_config_v1_analysis.txt` |
-| `04_data_organizing.py` | Copies matched images, labels, and CFD files into `training_subset_v1/` |
-| `05_nnUNet_labels_metrics_generation.py` | Runs nnUNet segmentation and extracts AAA geometry metrics |
-| `06_crop_full_body_scans.py` | Crops each CT axially to the nnUNet-segmented aortic region + padding, ensuring the axial physical extent is ≥ 480 mm (160 slices × 3 mm) so the target volume is filled with anatomy rather than empty air |
-| `07_generate_data_split.py` | Creates stratified train/val/test split JSON |
+Quick reference:
 
-### Site Configuration (`03_data_matching_v1.py`)
-
-Four sites are supported, each with its own filename pattern and ID normalisation rule:
-
-| Site key | File pattern | SPSS site string |
+| Step | Script | Output |
 |---|---|---|
-| `RNST` | `(\d+)_RNST` | `001 lokatie Arnhem` |
-| `MST` | `(\d+)_MST` | `007 - Medisch Spectrum Twente (MST)` |
-| `AUMC` | `(\d+)_AUMC` | `008 - AmsterdamUMC` |
-| `UMCG` | `(\d+)_UMCG` | `009 - UMCG` |
-
-Adding a new site requires adding an entry to `SITE_CONFIG` in `03_data_matching_v1.py`.
-
-### Analysis Report
-
-`03_data_matching_v1.py` writes a detailed analysis to:
-```
-clinical_data/radar_multimodal_config_v1_analysis.txt
-```
-
-This includes a unified ground-truth table (total + per-site columns) and a data quality section listing patients with missing baseline or follow-up diameter measurements.
+| 00 | `00_dicom_to_nifti_renaming.py` | `imagesTr_all/*.nii.gz` |
+| 01 | `01_build_session_index.py` | `session_index_v1.json` |
+| 02 | `02_cfd_name_cleaning.py` | `CFDs/renamed_v1/*.vtp` |
+| 03 | `03_data_matching_v1.py` | `radar_multimodal_config_v1.json` |
+| 04 | `04_data_organizing.py` | `training_subset_v1/imagesTr/` |
+| 05 | `05_nnUNet_labels_metrics_generation.py` | `labelsTr/`, `distMapsTr/`, `metricsTr/` |
+| 06 | `06_crop_full_body_scans.py` | crops `imagesTr/`, `labelsTr/`, `distMapsTr/` in-place |
+| 07 | `07_generate_data_split.py` | `dataset_splits.json` |

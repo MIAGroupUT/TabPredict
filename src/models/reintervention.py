@@ -44,8 +44,9 @@ def get_model(m: nn.Module) -> nn.Module:
 def is_classical_backbone(model: nn.Module) -> bool:
     """True when the tabular branch is non-differentiable (no gradient path).
 
-    Covers both sklearn wrappers (ClassicalBranchWrapper) and TabPFN
-    (TabPFNBranchWrapper).  Both set ``_is_non_differentiable = True``.
+    Covers sklearn wrappers (ClassicalBranchWrapper) which set
+    ``_is_non_differentiable = True``.  TabPFNBranchWrapper is now
+    differentiable and no longer matches this predicate.
     """
     branch = get_model(model).clinical_branch
     return getattr(branch, "_is_non_differentiable", False)
@@ -103,7 +104,7 @@ def load_checkpoint(
     filtered_state = {k: v for k, v in state.items() if k in model_keys}
     model.load_state_dict(filtered_state, strict=False)
 
-    # Restore fitted classical baseline when present in checkpoint
+    # Restore fitted classical / TabPFN baseline when present in checkpoint
     if "classical_baseline_bytes" in ckpt:
         branch = get_model(model).clinical_branch
         if isinstance(branch, ClassicalBranchWrapper):
@@ -111,6 +112,9 @@ def load_checkpoint(
                 ckpt["classical_baseline_bytes"]
             )
             branch._fitted = True
+        elif hasattr(branch, "restore_from_bytes"):
+            # TabPFNBranchWrapper: restores _clf and re-establishes differentiable mode
+            branch.restore_from_bytes(ckpt["classical_baseline_bytes"])
 
     return ckpt
 

@@ -3,8 +3,8 @@ Tests for src/models/tabpfn.py — TabPFNBranchWrapper.
 
 All tests run on CPU with synthetic data.  No TabPFN fitting is performed
 (weight download + fine-tuning is slow); tests cover structural correctness,
-the non-differentiable marker, the zero-before-fit guard, and full-model
-integration via is_classical_backbone().
+the differentiable/manages_own_grad markers, the zero-before-fit guard, and
+full-model integration via is_classical_backbone().
 """
 
 from __future__ import annotations
@@ -26,9 +26,10 @@ def test_tabpfn_backbone_builds():
     assert not w._fitted
 
 
-def test_tabpfn_backbone_has_non_differentiable_marker():
+def test_tabpfn_backbone_is_differentiable():
     from src.models.tabpfn import TabPFNBranchWrapper
-    assert TabPFNBranchWrapper._is_non_differentiable is True
+    assert TabPFNBranchWrapper._is_non_differentiable is False
+    assert TabPFNBranchWrapper._manages_own_grad is True
 
 
 @pytest.mark.parametrize("n_estimators", [1, 4])
@@ -69,14 +70,15 @@ def test_tabpfn_model_builds():
     assert m is not None
 
 
-def test_tabpfn_is_classical_backbone():
+def test_tabpfn_is_not_classical_backbone():
+    """TabPFN is now differentiable — it should not be treated as a classical backbone."""
     from src.models.reintervention import ReinterventionRiskModel, is_classical_backbone
     m = ReinterventionRiskModel(
         clinical_dim=CLINICAL_DIM, aaa_dim=AAA_DIM, complications=[],
         clinical_backbone="tabpfn",
         tabm_cfg=dict(epochs=1, n_estimators_final_inference=1),
     )
-    assert is_classical_backbone(m)
+    assert not is_classical_backbone(m)
 
 
 def test_tabpfn_not_in_classical_backbones_list():

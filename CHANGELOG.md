@@ -13,6 +13,42 @@ _No unreleased changes._
 
 ---
 
+## [2026-06-10] — Differentiable TabPFN; models.md; GBM run; fix checkpoint deserialization → Checkpointing 10062026
+
+### Added
+
+- **`documentation/models.md`** — new technical reference covering all eight `clinical_branch` backbones (mlp, tabm, saint, lr, rf, gbm, xgboost, tabpfn). Includes a comparison table (differentiability, feature gate, imputation, projection type, fit timing, param count), per-model imputation breakdown (XGBoost no-op vs. median for others), projection rationale, execution flow per backbone type, and hyperparameter tables.
+- **`documentation/preprocessing.md`** — new 294-line technical walkthrough of the full v1 preprocessing pipeline (`preprocessing/case_matching_v1/`, steps 00–07): DICOM→NIfTI conversion, SPSS matching, nnUNet segmentation + AAA metrics generation, full-body crop logic, stratified split generation.
+- **`TabPFNBranchWrapper.n_trainable_layers`** (`int`, default `2`) — last N encoder/decoder transformer blocks kept trainable during Stage A + B. Set `0` for projection-only training. Implemented via `_setup_diff_mode()`: after `FinetunedTabPFNClassifier.fit()`, freezes all TabPFN params then selectively unfreezes the last N blocks of `transformer_decoder` (or `transformer_encoder` when no decoder).
+- **`TabPFNBranchWrapper._setup_diff_mode()`** — sets `differentiable_input=True` on `finetuned_inference_classifier_`, calls `fit_with_differentiable_input(X_train, y_train)` to initialise `InferenceEngineCachePreprocessing(inference_mode=False)`, then configures `requires_grad` per layer. Called by both `fit()` and `restore_from_bytes()`.
+- **`TabPFNBranchWrapper.restore_from_bytes(data)`** — instance method replacing the broken static `deserialize()`. Restores `_clf` via joblib and immediately re-runs `_setup_diff_mode()` so the differentiable executor is live after checkpoint load.
+- **`TabPFNBranchWrapper._manages_own_grad = True`** — class flag read by `set_stage_a` / `set_stage_b` in `stages.py` to prevent clobbering the per-layer `requires_grad` flags configured by `_setup_diff_mode()`.
+
+### Changed
+
+- **`TabPFNBranchWrapper._is_non_differentiable`** `True` → `False`. TabPFN is now partially differentiable (last N blocks + projection). Consequence: `is_classical_backbone()` now returns `False` for TabPFN; the L1 **feature gate is trained** alongside the unfrozen blocks.
+- **`TabPFNBranchWrapper.forward()`** — replaced numpy path (`predict_raw_logits(x_np)` via `.detach().cpu().numpy()`) with differentiable tensor path: `diff_clf.forward(x, use_inference_mode=True, return_raw_logits=True)`. Gradient preserved because `TabPFNClassifier` sets `actual_inference_mode = use_inference_mode and not differentiable_input = False` when `differentiable_input=True`.
+- **`set_stage_a` / `set_stage_b`** (`stages.py`) — clinical branch params are no longer unconditionally enabled. When `branch._manages_own_grad` is `True`, only `branch.projection.requires_grad_(True)` is called; backbone layer grad flags are left as configured by `_setup_diff_mode()`.
+- **`load_checkpoint`** (`reintervention.py`) — fixed broken TabPFN deserialization. Previously only `ClassicalBranchWrapper` was handled; `TabPFNBranchWrapper` checkpoints were silently ignored (branch stayed unfitted after load). Now uses duck-typing `hasattr(branch, "restore_from_bytes")` to restore TabPFN branches.
+- **`experiments/v1_no_complications_tabpfn.yaml`** — `checkpoint_dir` and `run_name` updated from `08062026` → `10062026` for the new differentiable run.
+- **`experiments/v1_gradient_boosting.yaml`** — `checkpoint_dir` / `run_name` updated `04062026` → `08062026`. GBM backbone now submitted for the first time (job 512463, `10062026` run via `--set` overrides).
+- **`documentation/architecture.md`** — clarified 4-channel CTA description; added cross-link to `preprocessing.md` for AAA metrics derivation.
+- **`documentation/data.md`** — preprocessing pipeline section replaced with quick-reference table + link to `preprocessing.md`.
+- **`documentation/hpc.md`** — minor updates.
+- **`documentation/xai.md`** — substantial expansion (+140 lines).
+- **`eval/compare_results.ipynb`** — evaluation notebook updated.
+
+### Fixed
+
+- **TabPFN checkpoint deserialization** was entirely broken: `reintervention.py:load_checkpoint` only restored `ClassicalBranchWrapper` instances; `TabPFNBranchWrapper` was never restored from `classical_baseline_bytes`. The branch stayed in the unfitted zero-output state after loading a Stage A checkpoint into Stage B.
+
+### Tests
+
+- `test_tabpfn_backbone_has_non_differentiable_marker` renamed → **`test_tabpfn_backbone_is_differentiable`**: asserts `_is_non_differentiable is False` and `_manages_own_grad is True`.
+- `test_tabpfn_is_classical_backbone` renamed → **`test_tabpfn_is_not_classical_backbone`**: asserts `not is_classical_backbone(m)`.
+
+---
+
 ## [2026-06-08] — TabPFN single-checkpoint fix; median imputation; XGBoost NaN passthrough
 
 ### Added
