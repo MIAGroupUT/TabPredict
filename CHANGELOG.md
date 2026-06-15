@@ -13,6 +13,35 @@ _No unreleased changes._
 
 ---
 
+## [2026-06-15] — Classical backbone scalar projection (15062026)
+
+### Added
+
+- **`ClassicalBranchWrapper.use_tree_output`** (`bool`, default `False`) — new flag in `backbone_cfg` controlling the projection input for tree-based classical backbones. When `False` (default), all backends use a single calibrated probability → `Linear(1→32)` (64 params). When `True`, each backend exposes a richer structural representation: `rf`/`gbm` → per-tree output → `Linear(n_est→32)` (~9.6k params), `xgboost` → TreeSHAP per feature → `Linear(n_feat→32)` (~1.5k params). The default changed to `False` because on RADAR (~700 training samples) the wide projection has a 14:1 parameter-to-sample ratio and overfits, producing ~10% lower test AUC than the scalar approach.
+- **`03_data_matching_v1.py` — Vascutek Anaconda exclusion**: patients where `P_IP_P_DT == 9` are now excluded before matching. New `anaconda_excluded` counter in `stats`; analysis report prints count and per-site patient list.
+- **`03_data_matching_v1.py` — per-FU SAC change extraction**: `extract_ground_truth()` now computes `sac_per_fu` — per-FU-visit list of `{fu_num, date, diameter_mm, modality, diff_from_bl_mm, category}`. Also stores `baseline_diameter_mm` and `baseline_modality`.
+- **`03_data_matching_v1.py` — SAC CHANGE PER FOLLOW-UP VISIT report section** (console + file): one row per FU number with N measured and regression/stable/expansion counts.
+- **`03_data_matching_v1.py` — SAC PER-PATIENT DETAIL section** (file only): per-patient stacked table with op date + baseline then one row per FU visit. REGRESSION/EXPANSION uppercased.
+
+### Changed
+
+- **`experiments/v1_gradient_boosting.yaml`** — `checkpoint_dir` / `run_name` suffix `10062026` → `15062026`; `use_tree_output: false` added to `backbone_cfg`.
+- **`experiments/v1_random_forest.yaml`** — `use_tree_output: false` added to `backbone_cfg` (documented flag, existing behaviour already matched scalar default).
+- **`documentation/models.md`** — backbone comparison table footnote added for `use_tree_output`; projection section rewritten with two sub-tables (scalar default vs. tree output); YAML table Notes column updated to reflect scalar default for rf/gbm/xgboost; experiment YAML table expanded with all 9 primary-task configs.
+- **`03_data_matching_v1.py`** — existing `sac_regression` / `sac_stable` / `sac_expansion` ground-truth flags unchanged (baseline vs last FU); report clarifies with a note pointing to the new per-FU section.
+- **`pytest.ini`** — merged `testpaths = tests` and `addopts` from now-deleted `.pytest.ini`. Single config file; behaviour unchanged.
+
+### Removed
+
+- **`.pytest.ini`** — duplicate config deleted; consolidated into `pytest.ini`.
+
+### Tests
+
+- **`test_wrapper_projection_width`** split into `test_wrapper_projection_width_tree` (asserts wide projection when `use_tree_output=True`) and `test_wrapper_projection_width_scalar` (asserts `in_features=1` for all backends at default).
+- **`test_extract_features_shape`** split into `test_extract_features_shape_tree` (`use_tree_output=True`, wide output) and `test_extract_features_shape_scalar` (`use_tree_output=False`, shape `(B, 1)` for all backends).
+
+---
+
 ## [2026-06-10] — Richer classical projections; RF/GBM/XGBoost reruns; docs index → Checkpointing 10062026
 
 ### Added

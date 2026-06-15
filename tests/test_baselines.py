@@ -292,7 +292,7 @@ def test_fit_classical_backbone_forward_no_zeros(model_type):
 
 # ── projection width per model type ──────────────────────────────────────────
 
-_PROJ_IN_EXPECTED = [
+_PROJ_IN_TREE = [
     ("lr",      1),
     ("rf",      300),
     ("gbm",     300),
@@ -300,13 +300,24 @@ _PROJ_IN_EXPECTED = [
 ]
 
 @pytest.mark.parametrize("model_type,expected_proj_in", [
-    (m, p) for m, p in _PROJ_IN_EXPECTED if m != "xgboost" or _XGB_AVAILABLE
+    (m, p) for m, p in _PROJ_IN_TREE if m != "xgboost" or _XGB_AVAILABLE
 ])
-def test_wrapper_projection_width(model_type, expected_proj_in):
-    """Projection input width must match the per-model representation size."""
+def test_wrapper_projection_width_tree(model_type, expected_proj_in):
+    """use_tree_output=True → richer per-tree projection width."""
+    from src.models.baselines import ClassicalBranchWrapper
+    wrapper = ClassicalBranchWrapper(in_features=N_FEAT, model_type=model_type, use_tree_output=True)
+    assert wrapper.projection.in_features == expected_proj_in
+    assert wrapper.projection.out_features == 32
+
+
+@pytest.mark.parametrize("model_type", [
+    m for m in ["lr", "rf", "gbm", "xgboost"] if m != "xgboost" or _XGB_AVAILABLE
+])
+def test_wrapper_projection_width_scalar(model_type):
+    """use_tree_output=False (default) → always Linear(1→32)."""
     from src.models.baselines import ClassicalBranchWrapper
     wrapper = ClassicalBranchWrapper(in_features=N_FEAT, model_type=model_type)
-    assert wrapper.projection.in_features == expected_proj_in
+    assert wrapper.projection.in_features == 1
     assert wrapper.projection.out_features == 32
 
 
@@ -327,14 +338,26 @@ def test_gbm_leaf_scale_stored_after_fit(tabular_data):
     ("rf",  300),
     ("gbm", 300),
 ])
-def test_extract_features_shape(model_type, expected_cols, tabular_data):
-    """_extract_features must return (B, expected_cols) float32 array."""
+def test_extract_features_shape_tree(model_type, expected_cols, tabular_data):
+    """use_tree_output=True: _extract_features returns (B, expected_cols) float32."""
+    from src.models.baselines import ClassicalBranchWrapper
+    X_tr, y_tr, X_va, _ = tabular_data
+    wrapper = ClassicalBranchWrapper(in_features=N_FEAT, model_type=model_type, use_tree_output=True)
+    wrapper.fit(X_tr, y_tr)
+    feat = wrapper._extract_features(X_va)
+    assert feat.shape == (N_VAL, expected_cols)
+    assert feat.dtype == np.float32
+
+
+@pytest.mark.parametrize("model_type", ["lr", "rf", "gbm"])
+def test_extract_features_shape_scalar(model_type, tabular_data):
+    """use_tree_output=False (default): _extract_features returns (B, 1) float32."""
     from src.models.baselines import ClassicalBranchWrapper
     X_tr, y_tr, X_va, _ = tabular_data
     wrapper = ClassicalBranchWrapper(in_features=N_FEAT, model_type=model_type)
     wrapper.fit(X_tr, y_tr)
     feat = wrapper._extract_features(X_va)
-    assert feat.shape == (N_VAL, expected_cols)
+    assert feat.shape == (N_VAL, 1)
     assert feat.dtype == np.float32
 
 

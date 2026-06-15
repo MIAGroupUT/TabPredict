@@ -31,9 +31,11 @@ The **L1 feature gate** sits between the transform and the backbone for differen
 | `saint` | `SAINTEmbed` | ✓ | ✓ | DataLoader (NaN→z-median) | Built-in (→32) | Stage A + B | ~66k (col) / ~850k (colrow) |
 | `tabpfn` | `TabPFNBranchWrapper` | Partial* | ✓ | DataLoader (NaN→z-median) | `Linear(n_est×2→32)` | Phase 1 pre-A + Phase 2 A+B | 288 (projection) + last-N blocks |
 | `lr` | `ClassicalBranchWrapper` | ✗ | ✗ | Median (TabularBaseline) | `Linear(1→32)` | Before Stage A | ~32 (projection) |
-| `rf` | `ClassicalBranchWrapper` | ✗ | ✗ | Median (TabularBaseline) | `Linear(n_est→32)` | Before Stage A | ~9.6k (projection) |
-| `gbm` | `ClassicalBranchWrapper` | ✗ | ✗ | Median (TabularBaseline) | `Linear(n_est→32)` | Before Stage A | ~9.6k (projection) |
-| `xgboost` | `ClassicalBranchWrapper` | ✗ | ✗ | **None** (native NaN splits) | `Linear(n_feat→32)` | Before Stage A | ~1.5k (projection) |
+| `rf` | `ClassicalBranchWrapper` | ✗ | ✗ | Median (TabularBaseline) | `Linear(1→32)`† | Before Stage A | ~32† (projection) |
+| `gbm` | `ClassicalBranchWrapper` | ✗ | ✗ | Median (TabularBaseline) | `Linear(1→32)`† | Before Stage A | ~32† (projection) |
+| `xgboost` | `ClassicalBranchWrapper` | ✗ | ✗ | **None** (native NaN splits) | `Linear(1→32)`† | Before Stage A | ~32† (projection) |
+
+†Default (`use_tree_output: false`). Set `use_tree_output: true` in `backbone_cfg` to use the richer per-tree representation: rf/gbm → `Linear(n_est→32)` (~9.6k params), xgboost → `Linear(n_feat→32)` (~1.5k params). Richer projections require larger datasets (>5k samples) to outperform the scalar default on RADAR.
 
 *Last `n_trainable_layers` (default 2) transformer blocks trainable; remainder frozen.
 
@@ -45,16 +47,29 @@ The **L1 feature gate** sits between the transform and the backbone for differen
 
 **Classical backbones (lr / rf / gbm / xgboost):** The sklearn/XGBoost model is non-differentiable; its output is extracted as a structured representation and projected into the 32-dim fusion space. The projection is the *only* trainable component during Stage A + B.
 
-Each model exposes a different input to the projection:
+Each model exposes a different input to the projection, controlled by the `use_tree_output` flag in `backbone_cfg`:
+
+**`use_tree_output: false` (default — recommended for RADAR)**
+
+All tree-based backends collapse to a single calibrated probability. The projection is `Linear(1→32)` with only 64 trainable parameters — optimal for small datasets (~700 training samples) where a wider projection overfits severely.
 
 | Model | Representation | Shape | Projection |
 |-------|---------------|-------|------------|
-| `lr` | Scalar positive-class probability from `predict_proba` | `(B, 1)` | `Linear(1→32)` |
-| `rf` | Per-tree positive-class probability (`tree.predict_proba(X)[:,1]` for each estimator) | `(B, n_estimators)` | `Linear(n_est→32)` |
-| `gbm` | Per-tree leaf node index normalised by tree max (`clf.apply(X)` / max_per_tree) | `(B, n_estimators)` | `Linear(n_est→32)` |
-| `xgboost` | TreeSHAP values per input feature (`predict(X, pred_contribs=True)[:,:-1]`, bias dropped) | `(B, n_features)` | `Linear(n_feat→32)` |
+| `lr` | Scalar positive-class probability | `(B, 1)` | `Linear(1→32)` |
+| `rf` | Scalar positive-class probability | `(B, 1)` | `Linear(1→32)` |
+| `gbm` | Scalar positive-class probability | `(B, 1)` | `Linear(1→32)` |
+| `xgboost` | Scalar positive-class probability | `(B, 1)` | `Linear(1→32)` |
 
-This preserves ensemble diversity (rf/gbm) and per-feature attribution signal (xgboost) rather than collapsing to a single probability. `lr` stays scalar since it has no ensemble structure to expose.
+**`use_tree_output: true` (richer projections — for larger datasets)**
+
+| Model | Representation | Shape | Projection | Params |
+|-------|---------------|-------|------------|--------|
+| `lr` | Scalar probability (unchanged) | `(B, 1)` | `Linear(1→32)` | ~64 |
+| `rf` | Per-tree positive-class probability | `(B, n_est)` | `Linear(n_est→32)` | ~9.6k |
+| `gbm` | Per-tree leaf index / max_per_tree | `(B, n_est)` | `Linear(n_est→32)` | ~9.6k |
+| `xgboost` | TreeSHAP per input feature (bias dropped) | `(B, n_feat)` | `Linear(n_feat→32)` | ~1.5k |
+
+The richer representations preserve ensemble diversity (rf/gbm) and feature attribution signal (xgboost). However, the projection is the *only* trainable component (the sklearn model is frozen), so a wide projection on a small dataset produces a 14:1 parameter-to-sample ratio for rf/gbm — leading to overfitting and ~10% lower test AUC on RADAR.
 
 The GBM leaf scale (`max_per_tree`) is computed from the training set during `fit()` and stored on the `TabularBaseline` object so `joblib.dump` serialises it into the checkpoint alongside the sklearn model.
 
@@ -174,11 +189,22 @@ Pretrained weights downloaded automatically from HuggingFace (`Prior-Labs/TabPFN
 
 ## Experiment YAMLs
 
+Primary-task only (no complication heads). The with-complications variant (`v1_with_complications.yaml`) is not listed here — it uses TabM and adds 7 complication output heads.
+
 | File | Backbone | Notes |
 |------|----------|-------|
-| `v1_no_complications.yaml` | `mlp` | Baseline, no complication heads |
-| `v1_with_complications.yaml` | `mlp` | Multi-task, complication heads active |
-| `v1_no_complications_saint.yaml` | `saint` (col) | Column attention only |
+| `v1_no_complications.yaml` | `mlp` | Baseline |
+| `v1_no_complications_tabm.yaml` | `tabm` | TabM ensemble backbone |
+| `v1_no_complications_saint.yaml` | `saint` | Column attention only (`style='col'`) |
 | `v1_no_complications_tabpfn.yaml` | `tabpfn` | Pretrained in-context transformer |
+| `v1_logistic_regression.yaml` | `lr` | Classical: scalar probability → `Linear(1→32)` |
+| `v1_random_forest.yaml` | `rf` | Classical: scalar probability → `Linear(1→32)` (`use_tree_output: false`) |
+| `v1_gradient_boosting.yaml` | `gbm` | Classical: scalar probability → `Linear(1→32)` (`use_tree_output: false`) |
+| `v1_xgboost.yaml` | `xgboost` | Classical: scalar probability → `Linear(1→32)` |
+| `v1_no_complications_ablation_no_cta.yaml` | `mlp` | CTA zeroed out — tabular-only ablation, Stage B removed |
 
-TabM and classical (lr/rf/gbm/xgboost) backbones are selected via `--set clinical_backbone=tabm` (no dedicated YAML required).
+Dedicated YAMLs exist mainly for SLURM job submission. Any backbone can also be selected at runtime without a dedicated file:
+```bash
+python scripts/train.py --config experiments/v1_no_complications.yaml \
+    --set model.clinical_backbone=tabm
+```

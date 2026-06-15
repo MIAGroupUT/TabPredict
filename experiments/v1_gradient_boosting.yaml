@@ -22,6 +22,7 @@ model:
     subsample: 0.8
     max_features: 0.8
     min_samples_leaf: 3
+    use_tree_output: false   # scalar prob → Linear(1→32); avoids overfit on small N
 
 training:
   seed: 3299
@@ -63,9 +64,9 @@ training:
 
 paths:
   base_dir:       /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_gradient_boosting_10062026
+  checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_gradient_boosting_15062026
 
 wandb:
   project:  AAA-Reintervention-Risk
-  run_name: v1_gradient_boosting_10062026
+  run_name: v1_gradient_boosting_15062026
   mode:     online

@@ -219,15 +219,19 @@ def build_data_list(
             [clin_dict.get(k, np.nan) for k in feature_keys], dtype=np.float32
         )
 
-        pre_op      = (pdata.get("scans", {}).get("pre_op")) or {}
+        pre_op = (pdata.get("scans", {}).get("pre_op")) or {}
+        nifti  = pre_op.get("nifti")
+        if not nifti:
+            print(f"[WARN] build_data_list: {pid} has no pre-op CT nifti path — skipped")
+            continue
         aaa_metrics = _load_aaa_metrics(pre_op.get("metrics"))
         gt          = pdata.get("ground_truth", {})
         reint_label = float(gt.get("reintervention", 0))
 
         sample: dict[str, Any] = {
-            "ct":                   str(pre_op.get("nifti")),
-            "lbl":                  str(pre_op.get("label")),
-            "dst":                  str(pre_op.get("dist_map")),
+            "ct":                   nifti,
+            "lbl":                  pre_op.get("label"),
+            "dst":                  pre_op.get("dist_map"),
             "clin":                 clin,
             "aaa_metrics":          aaa_metrics,
             "reintervention_label": np.array([reint_label], dtype=np.float32),

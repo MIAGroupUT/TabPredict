@@ -19,6 +19,7 @@ model:
   backbone_cfg:
     n_estimators: 300
     min_samples_leaf: 2
+    use_tree_output: false   # true → Linear(300→32) per-tree probs; false → Linear(1→32) scalar prob
 
 training:
   seed: 3299

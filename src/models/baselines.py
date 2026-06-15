@@ -194,22 +194,29 @@ class ClassicalBranchWrapper(nn.Module):
     features + raw AAA scalars (same distribution as runtime inference).
 
     Args:
-        in_features: clinical_dim + aaa_dim (total tabular input width)
-        model_type:  one of CLASSICAL_BACKBONES
-        **kwargs:    hyperparameter overrides forwarded to TabularBaseline
+        in_features:      clinical_dim + aaa_dim (total tabular input width)
+        model_type:       one of CLASSICAL_BACKBONES
+        use_tree_output:  False (default) → Linear(1→32) from single calibrated
+                          probability. True → richer per-tree projection (see
+                          class docstring above). Set via backbone_cfg in YAML.
+        **kwargs:         hyperparameter overrides forwarded to TabularBaseline
     """
 
     _is_non_differentiable: bool = True   # read by is_classical_backbone()
 
-    def __init__(self, in_features: int, model_type: str, **kwargs) -> None:
+    def __init__(self, in_features: int, model_type: str, use_tree_output: bool = False, **kwargs) -> None:
         super().__init__()
-        self.model_type  = model_type
-        self.in_features = in_features
-        self.baseline    = TabularBaseline(model_type, **kwargs)
+        self.model_type      = model_type
+        self.in_features     = in_features
+        self.use_tree_output = use_tree_output
+        self.baseline        = TabularBaseline(model_type, **kwargs)
 
-        merged  = {**_DEFAULTS.get(model_type, {}), **kwargs}
-        n_est   = int(merged.get('n_estimators', 300))
-        proj_in = {'lr': 1, 'rf': n_est, 'gbm': n_est, 'xgboost': in_features}.get(model_type, 1)
+        if use_tree_output:
+            merged  = {**_DEFAULTS.get(model_type, {}), **kwargs}
+            n_est   = int(merged.get('n_estimators', 300))
+            proj_in = {'lr': 1, 'rf': n_est, 'gbm': n_est, 'xgboost': in_features}.get(model_type, 1)
+        else:
+            proj_in = 1  # single calibrated probability for all backends
 
         self.projection  = nn.Linear(proj_in, 32)
         self._fitted: bool = False
@@ -239,7 +246,14 @@ class ClassicalBranchWrapper(nn.Module):
         return X
 
     def _extract_features(self, x_np: np.ndarray) -> np.ndarray:
-        """Return the richer representation fed into the projection layer."""
+        """Return features fed into the projection layer.
+
+        use_tree_output=False (default): single calibrated probability (B, 1).
+        use_tree_output=True: richer per-tree representation — see class docstring.
+        """
+        if not self.use_tree_output:
+            return self.baseline.predict_proba(x_np)[:, np.newaxis].astype(np.float32)
+
         if self.model_type == 'lr':
             return self.baseline.predict_proba(x_np)[:, np.newaxis].astype(np.float32)
 
@@ -247,18 +261,15 @@ class ClassicalBranchWrapper(nn.Module):
         clf    = self.baseline.pipeline.named_steps['clf']
 
         if self.model_type == 'rf':
-            # Per-tree positive-class probability → (B, n_estimators)
             return np.column_stack([
                 tree.predict_proba(x_proc)[:, 1] for tree in clf.estimators_
             ]).astype(np.float32)
 
         if self.model_type == 'gbm':
-            # Normalised leaf node indices → (B, n_estimators)
             leaves = clf.apply(x_proc).squeeze(-1).astype(np.float32)
             return leaves / self.baseline._gbm_leaf_scale
 
         if self.model_type == 'xgboost':
-            # TreeSHAP values → (B, n_features); drop bias column
             dm   = _XGBDMatrix(x_proc)
             shap = clf.get_booster().predict(dm, pred_contribs=True).astype(np.float32)
             return shap[:, :-1]
