@@ -126,11 +126,13 @@ def set_stage_a(model: nn.Module) -> None:
             p.requires_grad = True
 
 
-def set_stage_b(model: nn.Module) -> None:
+def set_stage_b(model: nn.Module, freeze_clinical: bool = False) -> None:
     """
     Activate the full CTA visual pathway (cta_adapter, visual_proj, LoRA) at low LR.
     Re-initialise condition_net so Stage A clinical bias does not suppress visual features.
-    Tabular branches continue at reduced LR.
+
+    freeze_clinical=False (default): tabular branch continues training at reduced LR.
+    freeze_clinical=True: tabular branch + feature_gate frozen; visual pathway only.
     """
     model = get_model(model)
     for p in model.parameters():
@@ -141,14 +143,15 @@ def set_stage_b(model: nn.Module) -> None:
         if hasattr(m, "reset_parameters"):
             m.reset_parameters()
 
-    # Tabular + fusion — continue from Stage A at lower LR
-    if not is_classical_backbone(model):
-        model.feature_gate.requires_grad = True
-    if not getattr(model.clinical_branch, "_manages_own_grad", False):
-        for p in model.clinical_branch.parameters():
-            p.requires_grad = True
-    elif hasattr(model.clinical_branch, "projection"):
-        model.clinical_branch.projection.requires_grad_(True)
+    # Tabular + fusion — optionally frozen in Stage B
+    if not freeze_clinical:
+        if not is_classical_backbone(model):
+            model.feature_gate.requires_grad = True
+        if not getattr(model.clinical_branch, "_manages_own_grad", False):
+            for p in model.clinical_branch.parameters():
+                p.requires_grad = True
+        elif hasattr(model.clinical_branch, "projection"):
+            model.clinical_branch.projection.requires_grad_(True)
     for p in model.condition_net.parameters():
         p.requires_grad = True
     for p in model.fusion_norm.parameters():
@@ -177,8 +180,16 @@ def set_stage_b(model: nn.Module) -> None:
 
 # ── optimizer construction ────────────────────────────────────────────────────
 
-def build_optimizer(model: nn.Module, stage: str) -> torch.optim.Optimizer:
-    """Stage-specific learning rates (AdamW with weight decay)."""
+def build_optimizer(
+    model: nn.Module,
+    stage: str,
+    freeze_clinical: bool = False,
+) -> torch.optim.Optimizer:
+    """Stage-specific learning rates (AdamW with weight decay).
+
+    freeze_clinical only has effect in Stage B: when True, clinical branch and
+    feature_gate are excluded from the optimizer (they have no trainable params).
+    """
     model = get_model(model)
 
     classical = is_classical_backbone(model)
@@ -205,7 +216,6 @@ def build_optimizer(model: nn.Module, stage: str) -> torch.optim.Optimizer:
                            and ("layer3" in n or "layer4" in n)
                            and ".bn" in n]
         param_groups = [
-            {"params": model.clinical_branch.parameters(),     "lr": 5e-5, "name": "clinical"},
             {"params": model.condition_net.parameters(),       "lr": 5e-5, "name": "condition"},
             {"params": model.fusion_norm.parameters(),         "lr": 5e-5, "name": "fusion_norm"},
             {"params": model.cta_adapter.parameters(),         "lr": 1e-5, "name": "cta_adapter"},
@@ -213,10 +223,14 @@ def build_optimizer(model: nn.Module, stage: str) -> torch.optim.Optimizer:
             {"params": bn_image_params,                        "lr": 1e-5, "name": "i3resnet_bn"},
             {"params": model.reintervention_head.parameters(), "lr": 5e-5, "name": "reint_head"},
         ]
-        if not classical:
+        if not freeze_clinical:
             param_groups.insert(0,
-                {"params": [model.feature_gate], "lr": 3e-4, "name": "feature_gate"}
+                {"params": model.clinical_branch.parameters(), "lr": 5e-5, "name": "clinical"}
             )
+            if not classical:
+                param_groups.insert(0,
+                    {"params": [model.feature_gate], "lr": 3e-4, "name": "feature_gate"}
+                )
         if hasattr(model, "complications_head"):
             param_groups.append(
                 {"params": model.complications_head.parameters(), "lr": 5e-5, "name": "comp_head"}

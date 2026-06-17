@@ -380,7 +380,8 @@ def test_normalize_clinical_fill_value_only_replaces_nan():
 
 def test_build_data_list_basic(tmp_path):
     from src.data.loaders import build_data_list
-    config = {"p1": {"pre_op_features": {"a": 1.0}, "ground_truth": {"reintervention": 0}}}
+    config = {"p1": {"pre_op_features": {"a": 1.0}, "ground_truth": {"reintervention": 0},
+                     "scans": {"pre_op": {"nifti": "dummy.nii.gz"}}}}
     result = build_data_list(["p1"], tmp_path, config, ["a"])
     assert len(result) == 1
     item = result[0]
@@ -394,7 +395,8 @@ def test_build_data_list_clin_shape(tmp_path):
     from src.data.loaders import build_data_list
     feat_keys = ["a", "b", "c"]
     config = {"p1": {"pre_op_features": {"a": 1.0, "b": 2.0, "c": 3.0},
-                     "ground_truth": {"reintervention": 1}}}
+                     "ground_truth": {"reintervention": 1},
+                     "scans": {"pre_op": {"nifti": "dummy.nii.gz"}}}}
     result = build_data_list(["p1"], tmp_path, config, feat_keys)
     assert result[0]["clin"].shape == (3,)
 
@@ -402,16 +404,18 @@ def test_build_data_list_clin_shape(tmp_path):
 def test_build_data_list_aaa_defaults(tmp_path):
     """Metrics file absent → all-zeros list of length 5."""
     from src.data.loaders import build_data_list
-    config = {"p1": {"pre_op_features": {}, "ground_truth": {"reintervention": 0}}}
+    config = {"p1": {"pre_op_features": {}, "ground_truth": {"reintervention": 0},
+                     "scans": {"pre_op": {"nifti": "dummy.nii.gz"}}}}
     result = build_data_list(["p1"], tmp_path, config, [])
     assert result[0]["aaa_metrics"] == [0.0] * 5
 
 
 def test_build_data_list_reint_label(tmp_path):
     from src.data.loaders import build_data_list
+    _stub = {"scans": {"pre_op": {"nifti": "dummy.nii.gz"}}}
     config = {
-        "p1": {"pre_op_features": {}, "ground_truth": {"reintervention": 1}},
-        "p2": {"pre_op_features": {}, "ground_truth": {"reintervention": 0}},
+        "p1": {"pre_op_features": {}, "ground_truth": {"reintervention": 1}, **_stub},
+        "p2": {"pre_op_features": {}, "ground_truth": {"reintervention": 0}, **_stub},
     }
     result = build_data_list(["p1", "p2"], tmp_path, config, [])
     assert result[0]["reintervention_label"][0] == 1.0
@@ -422,7 +426,8 @@ def test_build_data_list_with_complications(tmp_path):
     from src.data.loaders import build_data_list
     comps  = ["endoleak_1a", "migration"]
     config = {"p1": {"pre_op_features": {}, "ground_truth":
-                     {"reintervention": 1, "endoleak_1a": 1}}}
+                     {"reintervention": 1, "endoleak_1a": 1},
+                     "scans": {"pre_op": {"nifti": "dummy.nii.gz"}}}}
     result = build_data_list(["p1"], tmp_path, config, [], complications=comps)
     assert "complication_labels" in result[0]
     labels = result[0]["complication_labels"]
@@ -433,7 +438,8 @@ def test_build_data_list_with_complications(tmp_path):
 
 def test_build_data_list_without_complications_no_comp_key(tmp_path):
     from src.data.loaders import build_data_list
-    config = {"p1": {"pre_op_features": {}, "ground_truth": {"reintervention": 0}}}
+    config = {"p1": {"pre_op_features": {}, "ground_truth": {"reintervention": 0},
+                     "scans": {"pre_op": {"nifti": "dummy.nii.gz"}}}}
     result = build_data_list(["p1"], tmp_path, config, [])
     assert "complication_labels" not in result[0]
 
@@ -576,7 +582,8 @@ def test_build_data_list_preserves_nan_for_missing_feature(tmp_path):
     NormalizeClinicald so imputation happens in z-space, not raw space."""
     from src.data.loaders import build_data_list
     config = {"p1": {"pre_op_features": {"a": np.nan, "b": 3.0},
-                     "ground_truth": {"reintervention": 0}}}
+                     "ground_truth": {"reintervention": 0},
+                     "scans": {"pre_op": {"nifti": "dummy.nii.gz"}}}}
     result = build_data_list(["p1"], tmp_path, config, ["a", "b"])
     clin = result[0]["clin"]
     assert np.isnan(clin[0]), "NaN feature must propagate to clin array"
@@ -589,7 +596,8 @@ def test_build_data_list_sentinel_in_raw_config_reaches_array_as_nan(tmp_path):
     from src.data.loaders import build_data_list
     # Simulate post-cleaning config (as returned by load_splits_and_config)
     config = {"p1": {"pre_op_features": {"fev": np.nan, "age": 65.0},
-                     "ground_truth": {"reintervention": 0}}}
+                     "ground_truth": {"reintervention": 0},
+                     "scans": {"pre_op": {"nifti": "dummy.nii.gz"}}}}
     result = build_data_list(["p1"], tmp_path, config, ["fev", "age"])
     assert np.isnan(result[0]["clin"][0])
     assert result[0]["clin"][1] == pytest.approx(65.0)
@@ -671,6 +679,7 @@ def _build_loaders_args(tmp_path):
         pid: {
             "pre_op_features": {"feat_a": 1.0, "feat_b": 0.5},
             "ground_truth": {"reintervention": i % 2},
+            "scans": {"pre_op": {"nifti": "dummy.nii.gz"}},
         }
         for i, pid in enumerate(pids_train + pids_val)
     }

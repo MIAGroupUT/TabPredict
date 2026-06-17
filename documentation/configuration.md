@@ -69,6 +69,11 @@ training:
   recall_beta: 2.0            # β for F-beta threshold search over PR curve
                               # β=2 → recall weighted 4× over precision (F2-score)
 
+  # Stage B clinical freeze
+  freeze_clinical_in_stage_b: false  # false (default): clinical branch continues training at 5e-5
+                                     # true: clinical branch + feature_gate frozen after Stage A;
+                                     #       Stage B becomes a visual-only adaptation pass
+
   # Modality dropout (applied in both Stage A and Stage B training)
   modality_dropout:
     p_cta: 0.0                # probability of zeroing CTA; set to 0 (CTA confirmed useful by ablation)

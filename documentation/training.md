@@ -27,20 +27,35 @@ Goal: establish stable multimodal fusion on tabular data before the visual backb
 
 ### Stage B — Backbone Adaptation
 
+Controlled by `freeze_clinical_in_stage_b` (YAML `training:` block, default `false`).
+
+#### `freeze_clinical_in_stage_b: false` (default — joint fine-tuning)
+
 | Frozen | Trainable |
 |---|---|
 | I3ResNet conv weights (layer1–4) | I3ResNet BatchNorm γ/β in layer3 and layer4 |
 | | `cta_adapter` |
 | | `visual_proj` |
-| | `clinical_branch` (at reduced LR 5e-5) |
-| | `aaa_metrics_branch` (at reduced LR 5e-5) |
+| | `clinical_branch` (continues at reduced LR 5e-5) |
 | | `condition_net` (re-initialised from scratch at stage start) |
 | | `fusion_norm` |
 | | `reintervention_head` |
 | | `complications_head` (if present) |
 | | `feature_gate` |
 
-Goal: recalibrate the Merlin backbone's feature statistics to the specific scanner types in this cohort (RNST, MST, UMCG, AUMC) using BatchNorm adaptation (~50 K params), while tabular branches continue to refine at a reduced learning rate. `condition_net` is re-initialised at stage start so Stage A's clinical-only bias does not suppress the newly-active visual features.
+#### `freeze_clinical_in_stage_b: true` (visual-only adaptation)
+
+| Frozen | Trainable |
+|---|---|
+| I3ResNet conv weights (layer1–4) | I3ResNet BatchNorm γ/β in layer3 and layer4 |
+| `clinical_branch` | `cta_adapter` |
+| `feature_gate` | `visual_proj` |
+| | `condition_net` (re-initialised from scratch at stage start) |
+| | `fusion_norm` |
+| | `reintervention_head` |
+| | `complications_head` (if present) |
+
+Goal: recalibrate the Merlin backbone's feature statistics to the specific scanner types in this cohort (RNST, MST, UMCG, AUMC) using BatchNorm adaptation (~50 K params). `condition_net` is re-initialised at stage start so Stage A's clinical-only bias does not suppress the newly-active visual features. With `freeze_clinical_in_stage_b: true`, the clinical branch is locked after Stage A — Stage B becomes a pure visual adaptation pass.
 
 ---
 
@@ -89,37 +104,48 @@ This pushes feature gate values toward zero for unimportant features, producing 
 
 `build_optimizer(model, stage)` creates a single `AdamW` optimizer with distinct parameter groups and learning rates per group.
 
-### Stage A parameter groups (6 or 7 with complications)
+### Stage A parameter groups (5 or 6 with complications)
 
 | Group name | Parameters | LR |
 |---|---|---|
 | `feature_gate` | Per-feature gate parameter | 1e-3 |
 | `clinical` | `clinical_branch` weights | 3e-4 |
-| `aaa` | `aaa_metrics_branch` weights | 3e-4 |
 | `condition` | FiLM condition network | 2e-4 |
 | `fusion_norm` | LayerNorm | 2e-4 |
 | `reint_head` | Reintervention head | 2e-4 |
 | `comp_head` | Complication heads (if present) | 2e-4 |
 
-Visual branch parameters are not included (frozen → no gradients).
+Visual branch parameters are not included (frozen → no gradients). Classical backbones omit `feature_gate` (no gradient path through sklearn).
 
-### Stage B parameter groups (9 or 10 with complications)
+### Stage B parameter groups
+
+**`freeze_clinical_in_stage_b: false`** — 8 groups (9 with complications):
 
 | Group name | Parameters | LR |
 |---|---|---|
 | `feature_gate` | Per-feature gate parameter | 3e-4 |
 | `clinical` | `clinical_branch` weights | 5e-5 |
-| `aaa` | `aaa_metrics_branch` weights | 5e-5 |
 | `condition` | FiLM (re-initialised) | 5e-5 |
 | `fusion_norm` | LayerNorm | 5e-5 |
 | `cta_adapter` | CTA input adapter | 1e-5 |
 | `visual_proj` | Visual projection layer | 1e-5 |
 | `i3resnet_bn` | BatchNorm γ/β in I3ResNet layer3+4 | 1e-5 |
-| `i3resnet_layer4` | Convolutional weights in I3ResNet layer4 | 5e-6 |
 | `reint_head` | Reintervention head | 5e-5 |
 | `comp_head` | Complication heads (if present) | 5e-5 |
 
-Layer4 conv weights are fine-tuned at a conservative 5e-6 LR so the backbone can learn EVAR-specific visual patterns beyond what general radiology pre-training provides. Layer3 conv weights remain frozen (only BN adapted).
+**`freeze_clinical_in_stage_b: true`** — 6 groups (7 with complications):
+
+| Group name | Parameters | LR |
+|---|---|---|
+| `condition` | FiLM (re-initialised) | 5e-5 |
+| `fusion_norm` | LayerNorm | 5e-5 |
+| `cta_adapter` | CTA input adapter | 1e-5 |
+| `visual_proj` | Visual projection layer | 1e-5 |
+| `i3resnet_bn` | BatchNorm γ/β in I3ResNet layer3+4 | 1e-5 |
+| `reint_head` | Reintervention head | 5e-5 |
+| `comp_head` | Complication heads (if present) | 5e-5 |
+
+Only I3ResNet BN layers (layer3+4) are adapted — conv weights remain frozen. Layer3+4 BN adaptation recalibrates feature statistics across scanner protocols without touching learned conv filters.
 
 ### Learning Rate Schedule
 

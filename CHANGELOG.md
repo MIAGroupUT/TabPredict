@@ -13,6 +13,33 @@ _No unreleased changes._
 
 ---
 
+## [2026-06-17] — Freeze clinical in Stage B; fix tests; bump experiment dates
+
+### Added
+
+- **`freeze_clinical_in_stage_b`** — new boolean flag in experiment YAML `training:` block. When `true`, the clinical branch and `feature_gate` are fully frozen during Stage B so only the visual pathway (cta_adapter, visual_proj, I3ResNet BN) and fusion/heads continue updating. Default `false` preserves the previous joint-training behaviour. All 10 experiment YAMLs set to `true` for the 17062026 runs.
+- **`set_stage_b(freeze_clinical=False)`** — `stages.py` now accepts `freeze_clinical` kwarg; when `True` skips enabling `requires_grad` on `clinical_branch` and `feature_gate`.
+- **`build_optimizer(freeze_clinical=False)`** — Stage B param groups omit `clinical` and `feature_gate` when `freeze_clinical=True` (6 groups instead of 8).
+- **4 new `test_stages` tests** — cover `freeze_clinical=True`: branch/gate frozen, visual still trains, optimizer group count (6) and group-name exclusion.
+- **`documentation/training.md`** — Stage B table split into two variants (`freeze_clinical=false` / `true`); optimizer group count tables corrected (removed stale `aaa` and `i3resnet_layer4` groups; Stage A 5 groups, Stage B 8/6).
+- **`documentation/configuration.md`** — `freeze_clinical_in_stage_b` key added with inline comments.
+
+### Changed
+
+- **All 10 experiment YAMLs** — `run_name` / `checkpoint_dir` date suffix bumped `15062026` → `17062026`. `v1_with_complications` also gets date suffix in `run_name` (was undated) and path moved to deepstore.
+- **All 10 experiment YAMLs** — `freeze_clinical_in_stage_b: true` set for 17062026 training runs.
+- **`v1_xgboost.yaml`** — `use_tree_output: false` added explicitly to `backbone_cfg` to enforce scalar-prob → `Linear(1→32)` projection (avoids high-dim TreeSHAP path on small N).
+
+### Fixed
+
+- **`tests/test_loaders.py`** — 12 `build_data_list` / `build_loaders` tests failing because test configs lacked `scans.pre_op.nifti`; added `"scans": {"pre_op": {"nifti": "dummy.nii.gz"}}` stub to all affected configs. All 420 tests now pass.
+
+### Removed
+
+- **`experiments/v1_no_complications.yaml`** — original MLP baseline config deleted; superseded by **`experiments/v1_no_complications_mlp.yaml`** (same hyperparameters, updated checkpoint path/run name).
+
+---
+
 ## [2026-06-15] — Classical backbone scalar projection (15062026)
 
 ### Added

@@ -217,8 +217,35 @@ def test_set_stage_b_trains_condition_net(fresh_model_no_comp):
 
 def test_set_stage_b_trains_clinical_branch(fresh_model_no_comp):
     from src.training.stages import set_stage_b
-    set_stage_b(fresh_model_no_comp)
+    set_stage_b(fresh_model_no_comp, freeze_clinical=False)
     for p in fresh_model_no_comp.clinical_branch.parameters():
+        assert p.requires_grad
+
+
+def test_set_stage_b_freeze_clinical_freezes_clinical_branch(fresh_model_no_comp):
+    from src.training.stages import set_stage_b
+    set_stage_b(fresh_model_no_comp, freeze_clinical=True)
+    for p in fresh_model_no_comp.clinical_branch.parameters():
+        assert not p.requires_grad
+
+
+def test_set_stage_b_freeze_clinical_freezes_feature_gate(fresh_model_no_comp):
+    from src.training.stages import set_stage_b
+    set_stage_b(fresh_model_no_comp, freeze_clinical=True)
+    assert not fresh_model_no_comp.feature_gate.requires_grad
+
+
+def test_set_stage_b_freeze_clinical_still_trains_visual(fresh_model_no_comp):
+    from src.training.stages import set_stage_b
+    set_stage_b(fresh_model_no_comp, freeze_clinical=True)
+    for p in fresh_model_no_comp.cta_adapter.parameters():
+        assert p.requires_grad
+
+
+def test_set_stage_b_freeze_clinical_still_trains_condition_net(fresh_model_no_comp):
+    from src.training.stages import set_stage_b
+    set_stage_b(fresh_model_no_comp, freeze_clinical=True)
+    for p in fresh_model_no_comp.condition_net.parameters():
         assert p.requires_grad
 
 
@@ -263,6 +290,23 @@ def test_build_optimizer_stage_b_group_count(fresh_model_no_comp):
     set_stage_b(fresh_model_no_comp)
     opt = build_optimizer(fresh_model_no_comp, "B")
     assert len(opt.param_groups) == 8  # tabular + cta_adapter + visual_proj + i3resnet_bn + head
+
+
+def test_build_optimizer_stage_b_freeze_clinical_group_count(fresh_model_no_comp):
+    from src.training.stages import build_optimizer, set_stage_b
+    set_stage_b(fresh_model_no_comp, freeze_clinical=True)
+    opt = build_optimizer(fresh_model_no_comp, "B", freeze_clinical=True)
+    # condition + fusion_norm + cta_adapter + visual_proj + i3resnet_bn + reint_head = 6
+    assert len(opt.param_groups) == 6
+
+
+def test_build_optimizer_stage_b_freeze_clinical_no_clinical_group(fresh_model_no_comp):
+    from src.training.stages import build_optimizer, set_stage_b
+    set_stage_b(fresh_model_no_comp, freeze_clinical=True)
+    opt    = build_optimizer(fresh_model_no_comp, "B", freeze_clinical=True)
+    names  = {g["name"] for g in opt.param_groups}
+    assert "clinical"     not in names
+    assert "feature_gate" not in names
 
 
 def test_build_optimizer_stage_b_i3resnet_bn_lr(fresh_model_no_comp):

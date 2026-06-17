@@ -529,11 +529,13 @@ def run_pipeline(cfg: dict) -> None:
                 from src.models.reintervention import load_checkpoint
                 load_checkpoint(get_model(model), prev_ckpt, device=DEVICE)
                 print(f"Loaded Stage A checkpoint: {prev_ckpt}")
-            set_stage_b(model)
+            freeze_clinical_b = cfg["training"].get("freeze_clinical_in_stage_b", False)
+            set_stage_b(model, freeze_clinical=freeze_clinical_b)
             if with_comp and isinstance(criterion, MultiTaskReinterventionLoss):
                 criterion.comp_weight = cfg["training"].get("comp_weight_stage_b", 0.3)
 
-        opt = build_optimizer(get_model(model), st)
+        opt = build_optimizer(get_model(model), st,
+                              freeze_clinical=cfg["training"].get("freeze_clinical_in_stage_b", False))
         T_0 = stage_cfg.get("T_0", 20 if st == "A" else 30)
         scheduler = CosineAnnealingWarmRestarts(opt, T_0=T_0, T_mult=2, eta_min=1e-7)
         scaler    = torch.cuda.amp.GradScaler()
