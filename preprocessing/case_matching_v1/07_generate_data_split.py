@@ -49,7 +49,7 @@ def generate_split(
     """
     base_path  = Path(base_dir)
     images_dir = base_path / "imagesTr"
-    output_path = base_path / "dataset_splits.json"
+    output_path = base_path / "dataset_splits_multitab.json"
 
     with open(config_json) as f:
         config = json.load(f)
@@ -135,6 +135,6 @@ def generate_split(
 # =========================================================
 if __name__ == "__main__":
     BASE_DIR    = "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1"
-    CONFIG_JSON = f"{BASE_DIR}/clinical_data/radar_multimodal_config_v1.json"
+    CONFIG_JSON = f"{BASE_DIR}/clinical_data/radar_multimodal_config_v1_multitab.json"
 
     generate_split(BASE_DIR, CONFIG_JSON, seed=3299, ratios=(0.7, 0.1, 0.2))
