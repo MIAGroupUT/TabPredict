@@ -23,12 +23,16 @@ _No unreleased changes._
 
 - **`03_data_matching_v1.py`** — Vascutek Anaconda device type (P_IP_P_DT=9) no longer excluded; all device types are now included in the matched dataset.
 - **Output filenames** — preprocessing and training pipeline now writes `_multitab`-suffixed files to avoid overwriting the v1 dataset: `radar_multimodal_config_v1_multitab.json`, `radar_multimodal_config_v1_multitab_analysis.txt`, `dataset_splits_multitab.json`. Affects `03_data_matching_v1.py`, `04_data_organizing.py`, `07_generate_data_split.py`, and `src/data/loaders.py`.
-- **Experiment `run_name` fields** — date suffix `_17062026` removed from all 9 experiment YAMLs for clean W&B run naming.
+- **Experiment `run_name` fields** — date suffix `_17062026` removed from all 9 experiment YAMLs for clean W&B run naming. `v1_` prefix also stripped from `run_name` and `checkpoint_dir` values in all 10 configs (e.g. `v1_no_complications_MLP` → `no_complications_MLP`).
+- **All output paths consolidated under deepstore** — logs → `/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/`, preprocessing logs → `.../logs/preprocessing_v1_multitab/`, models → `.../models/`, test results → `.../test_results/`. Updated in `submit_slurm.sh`, `prepare_data.sh`, and all experiment YAMLs.
+- **`submit_slurm.sh`** — `cd` path updated to `ai4evar_multitab`; example checkpoint and test-result paths reflect new deepstore layout.
 - **`documentation/data.md`** — all filename references updated to `_multitab` variants.
+- **`tests/test_loaders.py`** — fixture filenames updated to `_multitab` suffix (5 tests were failing after loader path change).
 
 ### Removed
 
 - **Weight EMA** (`weight_ema: 0.99`) — not present on this branch; state reflects `c046247` which predates the EMA + MC-dropout + AUROC-selection additions from `4083c1f`.
+- **Stale CHANGELOG artefacts** — removed two entries referencing an unrelated `claude_goal/` foundation-model/SSL-probe codebase that is not part of this repo.
 
 ---
 
