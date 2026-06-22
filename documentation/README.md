@@ -1,6 +1,6 @@
 # Documentation
 
-Technical reference for the AI4EVAR project. Each document covers one concern; start with **Architecture** if you're new to the codebase.
+Technical reference for the MICCAI 2026 MultiTab workshop submission. Each document covers one concern; start with **Architecture** if you're new to the codebase.
 
 ---
 
@@ -57,10 +57,13 @@ Reading XAI output?   → XAI
 
 | | Value |
 |-|-------|
-| Patients | ~1,000 AAA (RADAR database) |
+| Patients (with pre-op NIfTI) | 542 — AUMC: 91, MST: 152, RNST: 226, UMCG: 73 |
+| Train / Val / Test | 377 / 52 / 113 (seed 3299, 70/10/20) |
+| Re-intervention prevalence | 16.7% train · 15.4% val · 18.6% test |
+| Recommended pos_weight | 4.984 (314 neg / 63 pos in train) |
 | Clinical features (after filter) | ~42 (from 240 raw, <50% missing) |
 | AAA geometry scalars | 5 |
 | CTA input shape | 4 × 224 × 224 × 160 (CT + lumen + ILT + dist map) |
 | Fusion dim | 288 (256 visual + 32 tabular) |
-| Test suite | 350+ tests, CPU-only, ~40 s |
-| W&B project | `AAA-Reintervention-Risk` |
+| Test suite | 420 tests, CPU-only, ~20 s |
+| W&B project | `AAA-Reintervention-Risk-MultiTab` |
