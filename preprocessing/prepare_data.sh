@@ -5,12 +5,12 @@
 #SBATCH --mem=180G
 #SBATCH --time=180:00:00
 #SBATCH --partition=mia,mia-pof,am
-#SBATCH --output=/home/ranema/AI4EVAR/logs/06_crop_full_body_scans_V1.log
-#SBATCH --error=/home/ranema/AI4EVAR/logs/06_crop_full_body_scans_V1.err
+#SBATCH --output=/home/ranema/AI4EVAR/logs/multitab/preprocessing_v1_multitab/06_crop_full_body_scans_V1.log
+#SBATCH --error=/home/ranema/AI4EVAR/logs/multitab/preprocessing_v1_multitab/06_crop_full_body_scans_V1.err
 #SBATCH --job-name=prepare_data
 
-#--output=/home/ranema/AI4EVAR/logs/%x_%j.log
-#--error=/home/ranema/AI4EVAR/logs/%x_%j.err
+#--output=/home/ranema/AI4EVAR/logs/multitab/preprocessing_v1_multitab/%x_%j.log
+#--error=/home/ranema/AI4EVAR/logs/multitab/preprocessing_v1_multitab/%x_%j.err
 
 
 # -------------------------
@@ -20,7 +20,7 @@ source /etc/profile.d/modules.sh
 module load anaconda3/2025.06
 export HTTPS_PROXY="http://proxy.utwente.nl:3128"
 
-cd $HOME/AI4EVAR/ai4evar/preprocessing/case_matching_v1
+cd $HOME/AI4EVAR/ai4evar_multitab/preprocessing/case_matching_v1
 # -------------------------
 # SLURM runtime env
 # -------------------------

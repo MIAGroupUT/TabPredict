@@ -79,7 +79,7 @@ training:
 
 paths:
   base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_checkpoints/v1_no_complications_SAINT
+  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/v1_no_complications_SAINT
 
 wandb:
   project: AAA-Reintervention-Risk
