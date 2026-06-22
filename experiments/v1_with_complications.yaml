@@ -119,9 +119,9 @@ training:
 
 paths:
   base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_checkpoints/v1_with_complications_TabM_17062026
+  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_checkpoints/v1_with_complications_TabM
 
 wandb:
   project: AAA-Reintervention-Risk
-  run_name: v1_with_complications_TabM_17062026
+  run_name: v1_with_complications_TabM
   mode: online

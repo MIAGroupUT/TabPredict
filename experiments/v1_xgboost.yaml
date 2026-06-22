@@ -68,9 +68,9 @@ training:
 
 paths:
   base_dir:       /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_checkpoints/v1_xgboost_17062026
+  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_checkpoints/v1_xgboost
 
 wandb:
   project:  AAA-Reintervention-Risk
-  run_name: v1_xgboost_17062026
+  run_name: v1_xgboost
   mode:     online
