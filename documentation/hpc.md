@@ -9,8 +9,8 @@
 | Resources | 32 CPUs, 1 GPU, 180 GB RAM, 180h wall time |
 | Conda env | `/home/ranema/.conda/envs/ai4evar` (Python 3.11) |
 | Proxy | `HTTPS_PROXY=http://proxy.utwente.nl:3128` (required for W&B and package downloads) |
-| Logs | `/home/ranema/AI4EVAR/logs/<job_name>_<job_id>.log` |
-| Checkpoints | `/home/ranema/AI4EVAR/checkpoints/<experiment_name>/` |
+| Logs | `/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/<job_name>_<job_id>.log` |
+| Checkpoints | `/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/<experiment_name>/` |
 
 The proxy is set automatically by `scripts/submit_slurm.sh`.
 
@@ -20,7 +20,7 @@ The proxy is set automatically by `scripts/submit_slurm.sh`.
 
 All jobs are submitted through the wrapper. It:
 1. Sets the conda environment and proxy
-2. Changes to the `ai4evar/` directory
+2. Changes to the `ai4evar_multitab/` directory
 3. Calls either `scripts/train.py` or `scripts/test.py` with the provided arguments
 
 Usage:
@@ -37,14 +37,14 @@ sbatch [slurm-options] scripts/submit_slurm.sh train|test [script-args...]
 # Primary-task model (reintervention only)
 sbatch \
     --job-name=v1_no_comp \
-    --output=/home/ranema/AI4EVAR/logs/v1_no_comp_%j.log \
+    --output=/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/v1_no_comp_%j.log \
     scripts/submit_slurm.sh train \
-    --config experiments/v1_no_complications.yaml
+    --config experiments/v1_no_complications_mlp.yaml
 
 # Multi-task model (reintervention + 7 complications)
 sbatch \
     --job-name=v1_comp \
-    --output=/home/ranema/AI4EVAR/logs/v1_comp_%j.log \
+    --output=/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/v1_comp_%j.log \
     scripts/submit_slurm.sh train \
     --config experiments/v1_with_complications.yaml
 ```
@@ -53,7 +53,7 @@ Override config values at submission time:
 
 ```bash
 sbatch scripts/submit_slurm.sh train \
-    --config experiments/v1_no_complications.yaml \
+    --config experiments/v1_no_complications_mlp.yaml \
     --set training.batch_size=4 wandb.mode=offline
 ```
 
@@ -65,21 +65,21 @@ sbatch scripts/submit_slurm.sh train \
 # Primary-task model
 sbatch \
     --job-name=test_no_comp \
-    --output=/home/ranema/AI4EVAR/logs/test_no_comp_%j.log \
+    --output=/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/test_no_comp_%j.log \
     scripts/submit_slurm.sh test \
-    --config     experiments/v1_no_complications.yaml \
-    --checkpoint /home/ranema/AI4EVAR/checkpoints/v1_no_complications/best_stage_b.pt \
-    --output_dir /home/ranema/AI4EVAR/test_results/v1_no_complications \
+    --config     experiments/v1_no_complications_mlp.yaml \
+    --checkpoint /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/no_complications_MLP/best_stage_b.pt \
+    --output_dir /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/test_results/no_complications_MLP \
     --gradcam
 
 # Multi-task model
 sbatch \
     --job-name=test_comp \
-    --output=/home/ranema/AI4EVAR/logs/test_comp_%j.log \
+    --output=/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/test_comp_%j.log \
     scripts/submit_slurm.sh test \
     --config     experiments/v1_with_complications.yaml \
-    --checkpoint /home/ranema/AI4EVAR/checkpoints/v1_with_complications/best_stage_b.pt \
-    --output_dir /home/ranema/AI4EVAR/test_results/v1_with_complications \
+    --checkpoint /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/with_complications_TabM/best_stage_b.pt \
+    --output_dir /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/test_results/with_complications_TabM \
     --gradcam
 ```
 
@@ -91,7 +91,7 @@ Scripts live in `preprocessing/case_matching_v1/` and must be run in order (00 �
 See **[Preprocessing](preprocessing.md)** for the full technical description of each step.
 
 ```bash
-cd /home/ranema/AI4EVAR/ai4evar/preprocessing/case_matching_v1
+cd /home/ranema/AI4EVAR/ai4evar_multitab/preprocessing/case_matching_v1
 
 # Step 00 — DICOM → NIfTI (all sessions, all sites)
 python 00_dicom_to_nifti_renaming.py
@@ -127,7 +127,7 @@ python 07_generate_data_split.py
 squeue -u ranema
 
 # Live log tail
-tail -f /home/ranema/AI4EVAR/logs/*.log
+tail -f /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/*.log
 
 # Watch a specific job
 watch -n 10 squeue -u ranema -j <job_id>
