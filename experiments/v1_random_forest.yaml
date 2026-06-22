@@ -65,6 +65,6 @@ paths:
   checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/random_forest
 
 wandb:
-  project:  AAA-Reintervention-Risk
+  project: AAA-Reintervention-Risk-MultiTab
   run_name: random_forest
   mode:     online

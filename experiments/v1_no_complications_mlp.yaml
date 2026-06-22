@@ -70,6 +70,6 @@ paths:
   checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/no_complications_MLP
 
 wandb:
-  project: AAA-Reintervention-Risk
+  project: AAA-Reintervention-Risk-MultiTab
   run_name: no_complications_MLP
   mode: online
