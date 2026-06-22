@@ -310,15 +310,12 @@ def extract_ground_truth(row, df_columns: list, op_date: datetime.date | None = 
     fu_us = next((float(row.get(c)) for c, _ in fu_cands_us if pd.notna(row.get(c))), None)
 
     diam_mapping = None
-    bl_modality  = None
     if bl_ct is not None and fu_ct is not None:
         bl_val, fu_val = bl_ct, fu_ct
         diam_mapping = "CT-CT"
-        bl_modality  = "CT"
     elif bl_us is not None and fu_us is not None:
         bl_val, fu_val = bl_us, fu_us
         diam_mapping = "US-US"
-        bl_modality  = "US"
     else:
         bl_gen = [c for c in df_columns if re.search(r"^Bl_AAAdiam$", c)]
         if bl_ct is None and bl_us is None:
@@ -331,38 +328,11 @@ def extract_ground_truth(row, df_columns: list, op_date: datetime.date | None = 
         _fu_src = "CT" if fu_ct is not None else ("US" if fu_us is not None else None)
         if bl_val is not None and fu_val is not None:
             diam_mapping = f"{_bl_src}-{_fu_src}"
-        bl_modality = _bl_src if bl_val is not None else None
 
     diam_diff    = (fu_val - bl_val) if (bl_val is not None and fu_val is not None) else None
     sac_regression = int(diam_diff is not None and diam_diff <= -5.0)
     sac_stable     = int(diam_diff is not None and -5.0 < diam_diff < 5.0)
     sac_expansion  = int(diam_diff is not None and diam_diff >= 5.0)
-
-    # Per-FU sac: baseline vs every individual FU visit that has a diameter.
-    sac_per_fu: list[dict] = []
-    if bl_val is not None:
-        all_fu_nums = sorted({vn for _, vn in fu_cands_ct + fu_cands_us})
-        for fu_num in all_fu_nums:
-            ct_this = [c for c, vn in fu_cands_ct if vn == fu_num]
-            us_this = [c for c, vn in fu_cands_us if vn == fu_num]
-            fu_d = next((float(row.get(c)) for c in ct_this if pd.notna(row.get(c))), None)
-            fu_mod = "CT" if fu_d is not None else None
-            if fu_d is None:
-                fu_d = next((float(row.get(c)) for c in us_this if pd.notna(row.get(c))), None)
-                fu_mod = "US" if fu_d is not None else None
-            if fu_d is None:
-                continue
-            visit_date = _find_visit_date(fu_num, row, df_columns)
-            diff = round(fu_d - bl_val, 1)
-            category = "regression" if diff <= -5.0 else ("expansion" if diff >= 5.0 else "stable")
-            sac_per_fu.append({
-                "fu_num":          fu_num,
-                "date":            visit_date.isoformat() if visit_date else None,
-                "diameter_mm":     round(fu_d, 1),
-                "modality":        fu_mod,
-                "diff_from_bl_mm": diff,
-                "category":        category,
-            })
 
     gt_comps = {}
     comp_timing = {}
@@ -424,9 +394,6 @@ def extract_ground_truth(row, df_columns: list, op_date: datetime.date | None = 
         "has_fu_diam":       fu_val is not None,
         **gt_comps,
         "comp_timing":       comp_timing,
-        "sac_per_fu":           sac_per_fu,
-        "baseline_diameter_mm": round(bl_val, 1) if bl_val is not None else None,
-        "baseline_modality":    bl_modality,
     }
 
 
@@ -473,10 +440,9 @@ def build_multimodal_dataset_v1(
     post_op_cols = [c for c in df.columns if c not in pre_op_cols and c not in ["PatientNr", "patient_str", "site_str"]]
 
     final_data = {}
-    stats = {"total": 0, "matched": 0, "no_preop_ct": 0, "spss_not_found": 0, "no_op_date": 0, "anaconda_excluded": 0}
-    spss_not_found_list:    list[tuple[str, str]] = []
-    no_preop_ct_list:       list[tuple[str, str]] = []
-    anaconda_excluded_list: list[tuple[str, str, str, object]] = []  # (spss_id, site, folder_id, raw P_IP_P_DT)
+    stats = {"total": 0, "matched": 0, "no_preop_ct": 0, "spss_not_found": 0, "no_op_date": 0}
+    spss_not_found_list: list[tuple[str, str]] = []
+    no_preop_ct_list:    list[tuple[str, str]] = []
 
     for site_abbr, patients in session_index.items():
         cfg = SITE_CONFIG.get(site_abbr)
@@ -505,18 +471,6 @@ def build_multimodal_dataset_v1(
                 continue
 
             row = patient_rows.iloc[0]
-
-            # ---- Exclude Vascutek Anaconda (P_IP_P_DT == 9) ----
-            p_ip_p_dt = row.get("P_IP_P_DT")
-            try:
-                is_anaconda = float(p_ip_p_dt) == 9.0
-            except (TypeError, ValueError):
-                is_anaconda = False
-            if is_anaconda:
-                print(f"[EXCL] {folder_id} ({site_abbr}) excluded — Vascutek Anaconda (P_IP_P_DT={p_ip_p_dt})")
-                stats["anaconda_excluded"] += 1
-                anaconda_excluded_list.append((spss_id, site_abbr, folder_id, serialize_value(p_ip_p_dt)))
-                continue
 
             # ---- Operation date (hard boundary for pre/post-op) ----
             op_date = _parse_op_date(row.get("P_IP_P_Date"))
@@ -643,7 +597,7 @@ def build_multimodal_dataset_v1(
         json.dump(final_data, f, indent=4)
 
     print(f"Config saved → {output_json}")
-    _print_analysis_report(final_data, stats, spss_not_found_list, no_preop_ct_list, anaconda_excluded_list, output_json)
+    _print_analysis_report(final_data, stats, spss_not_found_list, no_preop_ct_list, output_json)
 
 
 def _print_analysis_report(
@@ -651,7 +605,6 @@ def _print_analysis_report(
     stats: dict,
     spss_not_found: list[tuple[str, str]],
     no_preop_ct: list[tuple[str, str]],
-    anaconda_excluded: list[tuple[str, str, str, object]],
     output_json: str,
 ) -> None:
     """Print analysis report to console and save full detail to <output>_analysis.txt."""
@@ -691,7 +644,6 @@ def _print_analysis_report(
     rprint("MULTI-MODAL DATASET ANALYSIS (v1)")
     rprint("=" * sep_len)
     rprint(f"  Patients in session index : {stats['total']}")
-    rprint(f"  Excluded — Vascutek Anaconda (P_IP_P_DT=9) : {stats['anaconda_excluded']}")
     rprint(f"  Matched to SPSS           : {stats['matched']}")
     rprint(f"  Not found in SPSS         : {stats['spss_not_found']}")
     rprint(f"  Missing op date           : {stats['no_op_date']}")
@@ -768,8 +720,6 @@ def _print_analysis_report(
 
     rprint(sep)
     rprint("* sac_regression / sac_stable / sac_expansion are % of sac_measured, not total")
-    rprint("  sac_regression / sac_stable / sac_expansion above = baseline vs LAST available FU diameter.")
-    rprint("  See 'SAC CHANGE PER FOLLOW-UP VISIT' section below for per-FU breakdown.")
     rprint("=" * sep_len)
 
     # ---- Diameter mapping strategy summary table ----
@@ -800,52 +750,9 @@ def _print_analysis_report(
     rprint("  None    : no diameter pair could be formed (missing baseline or follow-up)")
     rprint("=" * sep_len)
 
-    # ── SAC change per FU visit summary ──────────────────────────────────────
-    all_fu_nums_global = sorted({
-        e["fu_num"]
-        for p in final_data.values()
-        for e in p["ground_truth"].get("sac_per_fu", [])
-    })
-    rprint("\nSAC CHANGE PER FOLLOW-UP VISIT  (baseline vs each FU — additional to last-FU summary above)")
-    rprint(sep)
-    rprint(f"  Baseline: CT (Bl.*CTA.*AAAdiam) > US (Bl.*DUS.*AAAdiam) > Bl_AAAdiam.")
-    rprint(f"  Per FU  : CT preferred over US at same visit. Dates from FU{{N}}_Vas{{N}}_Fu_VDate_* columns.")
-    rprint(f"  Thresholds: regression ≤ -5 mm | stable -5..+5 mm | expansion ≥ +5 mm")
-    rprint(sep)
-    fu_hdr = f"  {'FU':<6} {'N (diam)':>10}   {'Regression':>12}   {'Stable':>12}   {'Expansion':>12}"
-    rprint(fu_hdr)
-    rprint("  " + "-" * (len(fu_hdr) - 2))
-    for fu_num in all_fu_nums_global:
-        entries = [
-            e for p in final_data.values()
-            for e in p["ground_truth"].get("sac_per_fu", [])
-            if e["fu_num"] == fu_num
-        ]
-        n     = len(entries)
-        n_reg = sum(1 for e in entries if e["category"] == "regression")
-        n_sta = sum(1 for e in entries if e["category"] == "stable")
-        n_exp = sum(1 for e in entries if e["category"] == "expansion")
-        rprint(
-            f"  FU{fu_num:<4} {n:>10}   "
-            f"{n_reg:>5} ({100*n_reg/n:5.1f}%)   "
-            f"{n_sta:>5} ({100*n_sta/n:5.1f}%)   "
-            f"{n_exp:>5} ({100*n_exp/n:5.1f}%)"
-        )
-    rprint(sep)
-    rprint("=" * sep_len)
-
     fprint("\n" + "=" * sep_len)
     fprint("DATA QUALITY DETAIL — PATIENT IDs")
     fprint("=" * sep_len)
-
-    excl_by_site: dict[str, list] = defaultdict(list)
-    for spss_id, site, folder_id, dt_val in anaconda_excluded:
-        excl_by_site[site].append(spss_id)
-    fprint(f"\nExcluded — Vascutek Anaconda (P_IP_P_DT=9) — {len(anaconda_excluded)} patients")
-    for site, pids in sorted(excl_by_site.items()):
-        fprint(f"  {site} ({len(pids)}): {', '.join(sorted(pids))}")
-    if not anaconda_excluded:
-        fprint("  (none)")
 
     nf_by_site: dict[str, list] = defaultdict(list)
     for fid, site in spss_not_found:
@@ -984,37 +891,6 @@ def _print_analysis_report(
             fprint("  (none)")
 
     fprint("=" * sep_len)
-
-    fprint("\n" + "=" * sep_len)
-    fprint("SAC PER-PATIENT DETAIL  (baseline → each FU visit)")
-    fprint("=" * sep_len)
-    fprint("  Thresholds: REGRESSION ≤ -5 mm  |  stable -5..+5 mm  |  EXPANSION ≥ +5 mm")
-    fprint(f"  {'':8}  {'Date':<12}  {'Mod':<4}  {'Diameter':>10}  {'Diff vs BL':>12}  Category")
-    fprint("=" * sep_len)
-    for key, p in sorted(final_data.items()):
-        gt      = p["ground_truth"]
-        per_fu  = gt.get("sac_per_fu", [])
-        bl_diam = gt.get("baseline_diameter_mm")
-        bl_mod  = gt.get("baseline_modality") or "?"
-        op_date = p["metadata"].get("op_date") or "unknown"
-        if bl_diam is None and not per_fu:
-            continue
-        if not per_fu:
-            # fprint(f"  {'':8}  (no FU diameters found)")
-            continue
-        fprint(f"\n  Patient: {key}")
-        bl_diam_str = f"{bl_diam:.1f} mm" if bl_diam is not None else "—"
-        fprint(f"  {'Op':<8}  {op_date:<12}  {bl_mod:<4}  {bl_diam_str:>10}  {'(baseline)':>12}")
-        for e in per_fu:
-            diff     = e["diff_from_bl_mm"]
-            cat      = e["category"].upper() if e["category"] != "stable" else "stable"
-            diam_str = f"{e['diameter_mm']:.1f} mm"
-            diff_str = f"{diff:+.1f} mm"
-            date_str = e["date"] or "no date"
-            mod_str  = e["modality"] or "?"
-            fu_label = f"FU{e['fu_num']}"
-            fprint(f"  {fu_label:<8}  {date_str:<12}  {mod_str:<4}  {diam_str:>10}  {diff_str:>12}  {cat}")
-    fprint("\n" + "=" * sep_len)
 
     fprint("\n" + "=" * sep_len)
     fprint("PER-PATIENT SCAN DETAIL")
