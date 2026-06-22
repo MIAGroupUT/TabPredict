@@ -65,9 +65,9 @@ training:
 
 paths:
   base_dir:       /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/v1_gradient_boosting
+  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/gradient_boosting
 
 wandb:
   project:  AAA-Reintervention-Risk
-  run_name: v1_gradient_boosting
+  run_name: gradient_boosting
   mode:     online
