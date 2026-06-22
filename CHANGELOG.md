@@ -13,6 +13,25 @@ _No unreleased changes._
 
 ---
 
+## [2026-06-22] — MICCAI MultiTab workshop branch setup
+
+### Added
+
+- **`miccai_multitab` branch** — dedicated branch for the MICCAI MultiTab workshop submission, branched from `c046247` (pre-EMA state).
+
+### Changed
+
+- **`03_data_matching_v1.py`** — Vascutek Anaconda device type (P_IP_P_DT=9) no longer excluded; all device types are now included in the matched dataset.
+- **Output filenames** — preprocessing and training pipeline now writes `_multitab`-suffixed files to avoid overwriting the v1 dataset: `radar_multimodal_config_v1_multitab.json`, `radar_multimodal_config_v1_multitab_analysis.txt`, `dataset_splits_multitab.json`. Affects `03_data_matching_v1.py`, `04_data_organizing.py`, `07_generate_data_split.py`, and `src/data/loaders.py`.
+- **Experiment `run_name` fields** — date suffix `_17062026` removed from all 9 experiment YAMLs for clean W&B run naming.
+- **`documentation/data.md`** — all filename references updated to `_multitab` variants.
+
+### Removed
+
+- **Weight EMA** (`weight_ema: 0.99`) — not present on this branch; state reflects `c046247` which predates the EMA + MC-dropout + AUROC-selection additions from `4083c1f`.
+
+---
+
 ## [2026-06-17] — Freeze clinical in Stage B; fix tests; bump experiment dates
 
 ### Added

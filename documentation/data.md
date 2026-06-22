@@ -13,8 +13,8 @@ All processed data lives under:
 ├── cfdTr/              # CFD hemodynamics (.vtp meshes, optional)
 ├── metricsTr/          # AAA geometry metrics (.json, one file per patient)
 └── clinical_data/
-    ├── radar_multimodal_config_v1.json   # per-patient clinical features + labels
-    └── dataset_splits.json               # stratified train / val / test split
+    ├── radar_multimodal_config_v1_multitab.json   # per-patient clinical features + labels
+    └── dataset_splits_multitab.json               # stratified train / val / test split
 ```
 
 Raw source data is under:
@@ -24,7 +24,7 @@ Raw source data is under:
 
 ---
 
-## Clinical Data — `radar_multimodal_config_v1.json`
+## Clinical Data — `radar_multimodal_config_v1_multitab.json`
 
 Each patient is stored as a top-level key `<patient_id>_<site>` (e.g. `0042_RNST`). The structure:
 
@@ -118,7 +118,7 @@ Of the 240 raw features (after dropping `PatientNr`), 198 (82%) are ≥50% missi
 
 ---
 
-## Dataset Splits — `dataset_splits.json`
+## Dataset Splits — `dataset_splits_multitab.json`
 
 Stratified split by re-intervention label and site. Format:
 
@@ -238,8 +238,8 @@ Quick reference:
 | 00 | `00_dicom_to_nifti_renaming.py` | `imagesTr_all/*.nii.gz` |
 | 01 | `01_build_session_index.py` | `session_index_v1.json` |
 | 02 | `02_cfd_name_cleaning.py` | `CFDs/renamed_v1/*.vtp` |
-| 03 | `03_data_matching_v1.py` | `radar_multimodal_config_v1.json` |
+| 03 | `03_data_matching_v1.py` | `radar_multimodal_config_v1_multitab.json` |
 | 04 | `04_data_organizing.py` | `training_subset_v1/imagesTr/` |
 | 05 | `05_nnUNet_labels_metrics_generation.py` | `labelsTr/`, `distMapsTr/`, `metricsTr/` |
 | 06 | `06_crop_full_body_scans.py` | crops `imagesTr/`, `labelsTr/`, `distMapsTr/` in-place |
-| 07 | `07_generate_data_split.py` | `dataset_splits.json` |
+| 07 | `07_generate_data_split.py` | `dataset_splits_multitab.json` |
