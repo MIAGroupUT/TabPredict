@@ -20,7 +20,7 @@
 #   Testing — single checkpoint, test split only (results in <output_dir>/test/):
 #     sbatch --job-name=test_no_comp scripts/submit_slurm.sh test \
 #         --config     experiments/v1_no_complications.yaml \
-#         --checkpoint /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/v1_no_complications/best_stage_b.pt \
+#         --checkpoint /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/v1_no_complications/best_stage_b.pt \
 #         --output_dir /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/test_results/v1_no_complications \
 #         --split test
 #
@@ -39,8 +39,8 @@
 #SBATCH --mem=180G
 #SBATCH --time=180:00:00
 #SBATCH --partition=main,mia,mia-pof,am
-#SBATCH --output=/home/ranema/AI4EVAR/logs/multitab/%x_%j.log
-#SBATCH --error=/home/ranema/AI4EVAR/logs/multitab/%x_%j.err
+#SBATCH --output=/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/%x_%j.log
+#SBATCH --error=/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/%x_%j.err
 
 set -euo pipefail
 
@@ -59,7 +59,7 @@ PYTHON="$HOME/.conda/envs/ai4evar/bin/python"
 
 # Always run from the repo root, regardless of where sbatch is called from
 cd "$HOME/AI4EVAR/ai4evar_multitab"
-mkdir -p /home/ranema/AI4EVAR/logs/multitab
+mkdir -p /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs
 
 # ── dispatch ──────────────────────────────────────────────────────────────────
 MODE="${1:-train}"

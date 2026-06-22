@@ -5,12 +5,12 @@
 #SBATCH --mem=180G
 #SBATCH --time=180:00:00
 #SBATCH --partition=mia,mia-pof,am
-#SBATCH --output=/home/ranema/AI4EVAR/logs/multitab/preprocessing_v1_multitab/06_crop_full_body_scans_V1.log
-#SBATCH --error=/home/ranema/AI4EVAR/logs/multitab/preprocessing_v1_multitab/06_crop_full_body_scans_V1.err
+#SBATCH --output=/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/preprocessing_v1_multitab/06_crop_full_body_scans_V1.log
+#SBATCH --error=/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/preprocessing_v1_multitab/06_crop_full_body_scans_V1.err
 #SBATCH --job-name=prepare_data
 
-#--output=/home/ranema/AI4EVAR/logs/multitab/preprocessing_v1_multitab/%x_%j.log
-#--error=/home/ranema/AI4EVAR/logs/multitab/preprocessing_v1_multitab/%x_%j.err
+#--output=/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/preprocessing_v1_multitab/%x_%j.log
+#--error=/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/preprocessing_v1_multitab/%x_%j.err
 
 
 # -------------------------
