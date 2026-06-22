@@ -10,7 +10,7 @@ scans end up in the same set so there is no data leakage across splits.
 The split JSON records patient keys (e.g. "2637442_AUMC").
 The DataLoader must expand these to individual scan NIfTIs at training time.
 
-Output: training_subset_v1/dataset_splits.json
+Output: training_subset_v1/dataset_splits_multitab.json
 {
   "train":    ["2637442_AUMC", "387_UMCG", ...],
   "val":      [...],
@@ -41,7 +41,7 @@ def generate_split(
     base_dir : str
         training_subset_v1 root (imagesTr/ expected here).
     config_json : str
-        Path to radar_multimodal_config_v1.json.
+        Path to radar_multimodal_config_v1_multitab.json.
     seed : int
         Random seed for determinism.
     ratios : tuple

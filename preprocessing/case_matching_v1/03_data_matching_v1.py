@@ -6,7 +6,7 @@ Combines:
   - SPSS .sav clinical database  (ground truth + clinical features)
   - session_index_v1.json        (imaging sessions from data, including scan_date)
 
-Output: radar_multimodal_config_v1.json
+Output: radar_multimodal_config_v1_multitab.json
 
 Pre-op / post-op classification
 --------------------------------
@@ -421,7 +421,7 @@ def build_multimodal_dataset_v1(
     derivatives_base : str
         Root under which training_subset_v1/ will live.
     output_json : str
-        Destination for the completed radar_multimodal_config_v1.json.
+        Destination for the completed radar_multimodal_config_v1_multitab.json.
     cfd_renamed_dir : str | None
         Directory of renamed CFD .vtp files (output of 02_cfd_name_cleaning.py).
     """
