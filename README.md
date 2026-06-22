@@ -45,9 +45,6 @@ python scripts/train.py --config experiments/v1_random_forest.yaml
 python scripts/train.py --config experiments/v1_gradient_boosting.yaml
 python scripts/train.py --config experiments/v1_xgboost.yaml
 
-# Train — multi-task (reintervention + 7 complications)
-python scripts/train.py --config experiments/v1_with_complications.yaml
-
 # Evaluate on test split
 python scripts/test.py \
     --config     experiments/v1_no_complications_mlp.yaml \
@@ -86,8 +83,7 @@ ai4evar_multitab/
 │   ├── v1_logistic_regression.yaml       # Logistic Regression backbone
 │   ├── v1_random_forest.yaml             # Random Forest backbone
 │   ├── v1_gradient_boosting.yaml         # Gradient Boosting backbone
-│   ├── v1_xgboost.yaml                   # XGBoost backbone
-│   └── v1_with_complications.yaml        # Multi-task (TabM + complication heads)
+│   └── v1_xgboost.yaml                   # XGBoost backbone
 ├── scripts/                              # Entry points
 │   ├── train.py                          # Training
 │   ├── test.py                           # Evaluation / inference

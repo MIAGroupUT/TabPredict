@@ -189,11 +189,11 @@ Pretrained weights downloaded automatically from HuggingFace (`Prior-Labs/TabPFN
 
 ## Experiment YAMLs
 
-Primary-task only (no complication heads). The with-complications variant (`v1_with_complications.yaml`) is not listed here — it uses TabM and adds 7 complication output heads.
+All 8 experiment configs target reintervention prediction only (primary-task, no complication heads).
 
 | File | Backbone | Notes |
 |------|----------|-------|
-| `v1_no_complications.yaml` | `mlp` | Baseline |
+| `v1_no_complications_mlp.yaml` | `mlp` | Baseline |
 | `v1_no_complications_tabm.yaml` | `tabm` | TabM ensemble backbone |
 | `v1_no_complications_saint.yaml` | `saint` | Column attention only (`style='col'`) |
 | `v1_no_complications_tabpfn.yaml` | `tabpfn` | Pretrained in-context transformer |
@@ -201,10 +201,3 @@ Primary-task only (no complication heads). The with-complications variant (`v1_w
 | `v1_random_forest.yaml` | `rf` | Classical: scalar probability → `Linear(1→32)` (`use_tree_output: false`) |
 | `v1_gradient_boosting.yaml` | `gbm` | Classical: scalar probability → `Linear(1→32)` (`use_tree_output: false`) |
 | `v1_xgboost.yaml` | `xgboost` | Classical: scalar probability → `Linear(1→32)` |
-| `v1_no_complications_ablation_no_cta.yaml` | `mlp` | CTA zeroed out — tabular-only ablation, Stage B removed |
-
-Dedicated YAMLs exist mainly for SLURM job submission. Any backbone can also be selected at runtime without a dedicated file:
-```bash
-python scripts/train.py --config experiments/v1_no_complications.yaml \
-    --set model.clinical_backbone=tabm
-```

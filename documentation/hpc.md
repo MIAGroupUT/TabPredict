@@ -34,19 +34,11 @@ sbatch [slurm-options] scripts/submit_slurm.sh train|test [script-args...]
 ## Training Jobs
 
 ```bash
-# Primary-task model (reintervention only)
 sbatch \
-    --job-name=v1_no_comp \
-    --output=/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/v1_no_comp_%j.log \
+    --job-name=mt_mlp \
+    --output=/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/mt_mlp_%j.log \
     scripts/submit_slurm.sh train \
     --config experiments/v1_no_complications_mlp.yaml
-
-# Multi-task model (reintervention + 7 complications)
-sbatch \
-    --job-name=v1_comp \
-    --output=/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/v1_comp_%j.log \
-    scripts/submit_slurm.sh train \
-    --config experiments/v1_with_complications.yaml
 ```
 
 Override config values at submission time:
@@ -62,24 +54,13 @@ sbatch scripts/submit_slurm.sh train \
 ## Test / Inference Jobs
 
 ```bash
-# Primary-task model
 sbatch \
-    --job-name=test_no_comp \
-    --output=/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/test_no_comp_%j.log \
+    --job-name=test_mlp \
+    --output=/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/test_mlp_%j.log \
     scripts/submit_slurm.sh test \
     --config     experiments/v1_no_complications_mlp.yaml \
     --checkpoint /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/no_complications_MLP/best_stage_b.pt \
     --output_dir /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/test_results/no_complications_MLP \
-    --gradcam
-
-# Multi-task model
-sbatch \
-    --job-name=test_comp \
-    --output=/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/test_comp_%j.log \
-    scripts/submit_slurm.sh test \
-    --config     experiments/v1_with_complications.yaml \
-    --checkpoint /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/with_complications_TabM/best_stage_b.pt \
-    --output_dir /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/test_results/with_complications_TabM \
     --gradcam
 ```
 
@@ -155,7 +136,7 @@ sinfo -p mia --format="%N %G %t"
 
 **W&B not syncing:** Check that the proxy is set. On the login node: `export HTTPS_PROXY=http://proxy.utwente.nl:3128` then test with `curl -I https://api.wandb.ai`.
 
-**Out of memory:** The most common cause is RAM exhaustion from persistent DataLoader workers accumulating RSS over epochs (Python copy-on-write degradation). Current defaults are `num_workers=4` (`v1_no_complications`) and `num_workers=6` (`v1_with_complications`) with `prefetch_factor=1`. If kills still occur, reduce further via `--set training.num_workers=2`. Also consider reducing `training.batch_size` or `training.train_cache_rate`.
+**Out of memory:** The most common cause is RAM exhaustion from persistent DataLoader workers accumulating RSS over epochs (Python copy-on-write degradation). Default is `num_workers=4` with `prefetch_factor=1`. If kills still occur, reduce via `--set training.num_workers=2`. Also consider reducing `training.batch_size` or `training.train_cache_rate`.
 
 **Job pending too long:** Try a different partition (`--partition mia-pof` or `--partition am`) or reduce resource requests.
 

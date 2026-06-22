@@ -6,9 +6,9 @@
 
 ```bash
 python scripts/test.py \
-    --config     experiments/v1_no_complications.yaml \
-    --checkpoint /home/ranema/AI4EVAR/checkpoints/v1_no_complications/best_stage_b.pt \
-    --output_dir /home/ranema/AI4EVAR/test_results/v1_no_complications \
+    --config     experiments/v1_no_complications_mlp.yaml \
+    --checkpoint /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/no_complications_MLP/best_stage_b.pt \
+    --output_dir /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/test_results/no_complications_MLP \
     [--split     test]      # "train" | "val" | "test" (default: "test")
     [--gradcam]             # also compute and save GradCAM PNGs (slower)
     [--workers   8]         # DataLoader workers
@@ -20,9 +20,9 @@ The checkpoint contains all necessary normalisation stats (`clin_mean`, `clin_st
 
 ```bash
 sbatch --job-name=test_no_comp scripts/submit_slurm.sh test \
-    --config     experiments/v1_no_complications.yaml \
-    --checkpoint /home/ranema/AI4EVAR/checkpoints/v1_no_complications/best_stage_b.pt \
-    --output_dir /home/ranema/AI4EVAR/test_results/v1_no_complications \
+    --config     experiments/v1_no_complications_mlp.yaml \
+    --checkpoint /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/no_complications_MLP/best_stage_b.pt \
+    --output_dir /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/test_results/no_complications_MLP \
     --gradcam
 ```
 

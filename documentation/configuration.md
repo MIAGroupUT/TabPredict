@@ -4,12 +4,14 @@ Experiments are defined by YAML files in `experiments/`. All share the same 2-st
 
 | File | Backbone | Task |
 |---|---|---|
-| `v1_no_complications.yaml` | MLP | Reintervention prediction only |
-| `v1_with_complications.yaml` | TabM | Reintervention + 7 complication heads |
-| `v1_logistic_regression.yaml` | Logistic Regression | Reintervention prediction only |
-| `v1_random_forest.yaml` | Random Forest | Reintervention prediction only |
-| `v1_gradient_boosting.yaml` | Gradient Boosting | Reintervention prediction only |
-| `v1_xgboost.yaml` | XGBoost | Reintervention prediction only |
+| `v1_no_complications_mlp.yaml` | MLP | Reintervention prediction |
+| `v1_no_complications_saint.yaml` | SAINT | Reintervention prediction |
+| `v1_no_complications_tabm.yaml` | TabM | Reintervention prediction |
+| `v1_no_complications_tabpfn.yaml` | TabPFN | Reintervention prediction |
+| `v1_logistic_regression.yaml` | Logistic Regression | Reintervention prediction |
+| `v1_random_forest.yaml` | Random Forest | Reintervention prediction |
+| `v1_gradient_boosting.yaml` | Gradient Boosting | Reintervention prediction |
+| `v1_xgboost.yaml` | XGBoost | Reintervention prediction |
 
 ---
 
@@ -48,7 +50,7 @@ model:
 training:
   seed: 3299                  # global seed for Python, NumPy, PyTorch, CUDA
   batch_size: 8               # samples per GPU batch
-  # num_workers is set per experiment: 8 for v1_no_complications, 16 for v1_with_complications
+  # num_workers: DataLoader workers (default 4)
   image_size: [224, 224, 160] # spatial dimensions after preprocessing
   voxel_spacing: [1.5, 1.5, 3]    # resampling target (mm); matches Merlin's pretrained geometry
   hu_range: [-1000, 1000]      # HU clip range for CT intensity scaling
@@ -106,58 +108,13 @@ training:
 # ── Paths ─────────────────────────────────────────────────────────────────────
 paths:
   base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  checkpoint_dir: /home/ranema/AI4EVAR/checkpoints/v1_no_complications
+  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/no_complications_MLP
 
 # ── W&B ───────────────────────────────────────────────────────────────────────
 wandb:
-  project: AAA-Reintervention-Risk
-  run_name: v1_no_complications
+  project: AAA-Reintervention-Risk-MultiTab
+  run_name: no_complications_MLP
   mode: online                # "online" | "offline" | "disabled"
-```
-
----
-
-## Multi-Task Variant Differences
-
-The `v1_with_complications.yaml` adds complications and adjusts the comp loss weight per stage. It also includes per-complication loss and class-imbalance weights:
-
-```yaml
-model:
-  complications:
-    - endoleak_1a
-    - endoleak_1b
-    - endoleak_2
-    - endoleak_3
-    - endoleak_5
-    - migration
-    - infection
-
-training:
-  # comp_weight scales the complication loss relative to the reintervention loss
-  # Typically lower in Stage A (tabular warm-up) and higher in Stage B
-  comp_weight_stage_a: 0.01
-  comp_weight_stage_b: 0.3
-
-  # Per-complication relative contribution to the gradient (sqrt(N_pos / N_pos_max))
-  # Prevents noisy rare tasks from dominating the complication gradient
-  comp_loss_weights:
-    endoleak_1a: 0.4
-    endoleak_1b: 0.6
-    endoleak_2:  1.0    # most common; anchor
-    endoleak_3:  0.1
-    endoleak_5:  0.4
-    migration:   0.3
-    infection:   0.2
-
-  # Per-complication positive class weight (N_neg / N_pos in training split, capped at 20)
-  comp_pos_weights:
-    endoleak_1a: 16.0
-    endoleak_1b:  9.0
-    endoleak_2:   2.1
-    endoleak_3:  20.0
-    endoleak_5:  16.0
-    migration:   20.0
-    infection:   20.0
 ```
 
 ---
@@ -168,11 +125,11 @@ Any config value can be overridden with `--set` using dot-path notation. The CLI
 
 ```bash
 # Single override
-python scripts/train.py --config experiments/v1_no_complications.yaml \
+python scripts/train.py --config experiments/v1_no_complications_mlp.yaml \
     --set training.batch_size=4
 
 # Multiple overrides
-python scripts/train.py --config experiments/v1_no_complications.yaml \
+python scripts/train.py --config experiments/v1_no_complications_mlp.yaml \
     --set training.batch_size=4 \
           training.stages[0].epochs=2 \
           wandb.mode=disabled \
@@ -191,7 +148,7 @@ Nested keys use dot notation: `training.modality_dropout.p_cta=0.5`.
 
 ## Adding a New Experiment
 
-1. Copy `experiments/v1_no_complications.yaml` to `experiments/my_experiment.yaml`
+1. Copy `experiments/v1_no_complications_mlp.yaml` to `experiments/my_experiment.yaml`
 2. Update `name`, `version`, and `paths.checkpoint_dir`
 3. Adjust any hyperparameters
 4. Run:
