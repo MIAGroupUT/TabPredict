@@ -61,7 +61,7 @@ Reading XAI output?   → XAI
 | Train / Val / Test | 377 / 52 / 113 (seed 3299, 70/10/20) |
 | Re-intervention prevalence | 16.7% train · 15.4% val · 18.6% test |
 | Recommended pos_weight | 4.984 (314 neg / 63 pos in train) |
-| Clinical features (after filter) | ~42 (from 240 raw, <50% missing) |
+| Clinical features (after filter) | 43 (from 238 raw, <50% missing) |
 | AAA geometry scalars | 5 |
 | CTA input shape | 4 × 224 × 224 × 160 (CT + lumen + ILT + dist map) |
 | Fusion dim | 288 (256 visual + 32 tabular) |
