@@ -2,7 +2,7 @@
 
 Submission to the [MICCAI 2026 MultiTab Workshop](https://multitab-miccai-2026.github.io).
 
-Multi-modal deep learning for post-operative re-intervention risk prediction in EVAR patients, combining CT volumes, clinical tabular data, and AAA geometry metrics from the **RADAR database** (~1,000 AAA patients).
+Multi-modal deep learning for post-operative re-intervention risk prediction in EVAR patients, combining CT volumes, clinical tabular data, and AAA geometry metrics from the **RADAR database** (542 AAA patients with imaging, 4 sites).
 
 **Institution:** University of Twente &nbsp;|&nbsp; **W&B project:** `AAA-Reintervention-Risk-MultiTab`
 
