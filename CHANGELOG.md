@@ -195,8 +195,6 @@ _No unreleased changes._
 ### Fixed
 
 - **`torch.cuda.amp.autocast()` → `torch.amp.autocast('cuda')`** in `src/training/trainer.py` — silences PyTorch 2.x deprecation warning.
-- **Foundation model downstream OOM** (`claude_goal/`): `batch_size` 6→2; `gradient_checkpointing: true` and `use_checkpoint: true` added to downstream configs; `downstream_trainer.py` converted DataParallel → DDP.
-- **SSL probe OOM** (`claude_goal/`): `extract_traj_tokens` / `intra_inter_distance_ratio` replaced batch-all-timepoints with `_encode_timepoints_loop` (one timepoint at a time, 8× lower peak VRAM).
 
 ### Changed
 
