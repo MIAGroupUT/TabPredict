@@ -17,7 +17,7 @@ _No unreleased changes._
 
 ### Added
 
-- **`miccai_multitab` branch** — dedicated branch for the MICCAI MultiTab workshop submission, branched from `c046247` (pre-EMA state).
+- **`miccai_multitab` branch** — dedicated branch for the MICCAI MultiTab workshop submission, branched from `c046247`.
 
 ### Changed
 
