@@ -504,8 +504,9 @@ def run_pipeline(cfg: dict) -> None:
     xai_every    = cfg["training"].get("xai_every_n_epochs", 10)
     xai_samples  = cfg["training"].get("xai_samples", 4)
     xai_gradcam  = cfg["training"].get("xai_gradcam", False)
-    recall_beta  = cfg["training"].get("recall_beta", 1.0)
-    disable_cta  = cfg["training"].get("disable_cta", False)
+    recall_beta      = cfg["training"].get("recall_beta", 1.0)
+    selection_metric = cfg["training"].get("selection_metric", "fbeta")  # fbeta | auroc
+    disable_cta      = cfg["training"].get("disable_cta", False)
 
     # ── classical backbone: fit sklearn model once before any stage ───────────
     if is_classical_backbone(model):
@@ -543,7 +544,7 @@ def run_pipeline(cfg: dict) -> None:
         print_model_param_overview(model)
         model = model.to(DEVICE).to(memory_format=torch.channels_last_3d)
 
-        best_val_fbeta   = 0.0
+        best_val_score   = 0.0
         patience_counter = 0
         gate_l1_w        = cfg["training"].get("gate_l1_weight", 1e-3)
         apply_dropout    = True  # both stages; Stage A needs it to prevent clinical memorisation
@@ -641,11 +642,12 @@ def run_pipeline(cfg: dict) -> None:
                     size=size, batch_size=batch_size,
                 )
 
-            # Save by F-beta (recall-weighted) rather than AUC: in a safety-critical
-            # setting catching all positives (recall) matters more than discrimination.
-            val_fbeta = val_metrics.get("val/reint_best_fbeta", 0.0)
-            if val_fbeta > best_val_fbeta:
-                best_val_fbeta   = val_fbeta
+            if selection_metric == "auroc":
+                val_score = val_metrics.get("val/reint_auc", 0.0)
+            else:
+                val_score = val_metrics.get("val/reint_best_fbeta", 0.0)
+            if val_score > best_val_score:
+                best_val_score   = val_score
                 patience_counter = 0
                 ckpt_dict = {
                     "state_dict":    get_model(model).state_dict(),
@@ -664,9 +666,10 @@ def run_pipeline(cfg: dict) -> None:
                         get_model(model).clinical_branch.serialize()
                     )
                 torch.save(ckpt_dict, checkpoint_dir / f"best_stage_{st.lower()}.pt")
+                metric_label = f"AUROC={best_val_score:.4f}" if selection_metric == "auroc" else f"F{recall_beta:.0f}={best_val_score:.4f}"
                 print(
                     f"  ✓ Checkpoint saved "
-                    f"(F{recall_beta:.0f}={best_val_fbeta:.4f}, "
+                    f"({metric_label}, "
                     f"AUC={val_metrics.get('val/reint_auc', 0):.4f}, "
                     f"rec={val_metrics.get('val/reint_recall', 0):.4f}, "
                     f"thresh={val_metrics.get('val/reint_best_thresh', 0):.3f}@F{recall_beta:.0f})"
@@ -674,9 +677,10 @@ def run_pipeline(cfg: dict) -> None:
             else:
                 patience_counter += 1
                 if patience_counter >= stage_cfg.get("patience", 8):
+                    metric_label = f"AUROC={best_val_score:.4f}" if selection_metric == "auroc" else f"F{recall_beta:.0f}={best_val_score:.4f}"
                     print(
                         f"Early stopping at epoch {epoch} "
-                        f"(best F{recall_beta:.0f}={best_val_fbeta:.4f})"
+                        f"(best {metric_label})"
                     )
                     break
 

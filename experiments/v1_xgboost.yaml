@@ -43,6 +43,7 @@ training:
   max_missing_pct: 0.5
   gate_l1_weight: 0.0
   recall_beta: 2.0
+  selection_metric: fbeta        # fbeta | auroc
   freeze_clinical_in_stage_b: true  # true → clinical branch frozen in Stage B (visual-only fine-tune)
 
   modality_dropout:

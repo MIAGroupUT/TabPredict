@@ -176,13 +176,15 @@ At inference time, dropout is never applied. `maybe_apply_modality_dropout(is_tr
 
 ## Class Imbalance Handling
 
-The training set has approximately 18% positive (reintervention) cases. The DataLoader uses a `WeightedRandomSampler` that draws positives and negatives with equal frequency (weight = 1/N_class per sample), producing roughly 50/50 batches. This eliminates the need to inflate `pos_weight` purely to counteract skew. `pos_weight = N_neg/N_pos ≈ 4.58` is still applied in the loss to encode the clinical preference: a missed positive (FN) is more costly than a false alarm (FP). The checkpoint is saved when the validation **F2-score** (β=2, weighting recall 4× over precision) improves, directly optimising for sensitivity rather than discrimination.
+The training set has approximately 18% positive (reintervention) cases. The DataLoader uses a `WeightedRandomSampler` that draws positives and negatives with equal frequency (weight = 1/N_class per sample), producing roughly 50/50 batches. This eliminates the need to inflate `pos_weight` purely to counteract skew. `pos_weight = N_neg/N_pos ≈ 4.58` is still applied in the loss to encode the clinical preference: a missed positive (FN) is more costly than a false alarm (FP). The checkpoint is saved when the validation metric set by `selection_metric` improves. Two options:
+- **`fbeta`** (default) — validation **F2-score** (β=2, recall weighted 4× over precision), directly optimising for sensitivity.
+- **`auroc`** — validation AUROC, a threshold-free discrimination measure; produces a more stable stopping signal with small positive counts.
 
 ---
 
 ## Checkpoints
 
-At the end of each epoch, if validation F2-score (recall_beta=2.0) improves, the trainer saves:
+At the end of each epoch, if the validation `selection_metric` (`fbeta` or `auroc`) improves, the trainer saves:
 
 ```python
 {
@@ -211,7 +213,7 @@ Checkpoints are written to `paths.checkpoint_dir` (see [Configuration](configura
 
 ## Early Stopping
 
-Each stage has a configurable `patience` (number of epochs without F2-score improvement before stopping). Defaults: Stage A patience=12, Stage B patience=20.
+Each stage has a configurable `patience` (number of epochs without improvement in `selection_metric` before stopping). Defaults: Stage A patience=12, Stage B patience=20. Temperature calibration and the F2-optimal threshold search always run on the val set after all stages, regardless of `selection_metric`.
 
 ---
 

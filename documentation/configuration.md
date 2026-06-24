@@ -67,9 +67,13 @@ training:
   gate_l1_weight: 0.0001      # L1 regularisation weight on feature gate
                               # kept low since gate now operates on ~42 filtered features, not 240
 
-  # Threshold selection
+  # Checkpoint selection & threshold
   recall_beta: 2.0            # β for F-beta threshold search over PR curve
                               # β=2 → recall weighted 4× over precision (F2-score)
+  selection_metric: fbeta     # fbeta (default) | auroc
+                              # fbeta: saves checkpoint on best val F2 (recall-focused)
+                              # auroc: saves on best val AUROC (stable with small N positives)
+                              # temperature calibration + F2 threshold search always use recall_beta
 
   # Stage B clinical freeze
   freeze_clinical_in_stage_b: false  # false (default): clinical branch continues training at 5e-5

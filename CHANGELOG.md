@@ -13,6 +13,22 @@ _No unreleased changes._
 
 ---
 
+## [2026-06-24] — Add selection_metric flag; remove generate_reports; eval label cleanup
+
+### Added
+
+- **`selection_metric`** — new `training:` YAML key (`fbeta` | `auroc`, default `fbeta`). Controls which val metric drives checkpoint saving and early stopping. `fbeta` preserves previous F2-based behaviour; `auroc` uses threshold-free AUROC as a more stable stopping signal with small positive counts. Temperature calibration and F2 threshold search always use `recall_beta` regardless of this setting. Added to all 8 experiment YAMLs and `trainer.py`.
+
+### Changed
+
+- **`eval/compare_results.ipynb`** — model display labels shortened: "Logistic Regression" → "LR", "Random Forest" → "RF", "GradientBoosting" → "GB".
+
+### Removed
+
+- **`preprocessing/generate_reports/`** — deleted LLM-based radiology report generation scripts (`generate_reports.py`, `run_reports.sh`, `test_mistral_download.py`); Mistral-based report generation is no longer part of the pipeline.
+
+---
+
 ## [2026-06-22] — MICCAI MultiTab workshop branch setup
 
 ### Added

@@ -129,7 +129,7 @@ def organize_v1_dataset(
 if __name__ == "__main__":
     CONFIG_JSON = (
         "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1/"
-        "clinical_data/radar_multimodal_config_v1_multitab.json"
+        "clinical_data/radar_multimodal_config_v1_multitab_no_umcg.json"
     )
     NIFTI_SOURCE = "/deepstore/datasets/mia/AI4EVAR/raw_data/RADAR_XNat/imagesTr_all"
     CFD_RENAMED  = "/deepstore/datasets/mia/AI4EVAR/raw_data/CFDs/renamed_v1"
