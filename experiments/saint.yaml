@@ -1,15 +1,15 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Experiment: v1_no_complications — SAINT tabular backbone
+# Experiment: SAINT tabular backbone
 #
 # Tabular branch: SAINT (Self-Attention and Intersample Attention Transformer)
 #   style='colrow' — full SAINT with both column and row (intersample) attention
 #   style='col'    — SAINT-s (column attention only, cheaper)
 #
-# All other hyperparameters match v1_no_complications (MLP/TabM baseline).
+# All other hyperparameters match mlp.yaml (MLP/TabM baseline).
 # Reference: https://github.com/somepago/saint
 # ─────────────────────────────────────────────────────────────────────────────
 
-name: v1_no_complications_saint
+name: saint
 version: 1
 description: >
   SAINT tabular backbone: column + intersample attention over feature tokens.
@@ -54,7 +54,7 @@ training:
   max_missing_pct: 0.5
   gate_l1_weight: 0.0001
   recall_beta: 2.0
-  selection_metric: fbeta        # fbeta | auroc
+  selection_metric: auroc        # fbeta | auroc
   freeze_clinical_in_stage_b: true  # true → clinical branch frozen in Stage B (visual-only fine-tune)
 
   modality_dropout:
@@ -80,9 +80,9 @@ training:
 
 paths:
   base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/no_complications_SAINT
+  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models_no_umcg_auroc/SAINT
 
 wandb:
   project: AAA-Reintervention-Risk-MultiTab
-  run_name: no_complications_SAINT
+  run_name: SAINT
   mode: online

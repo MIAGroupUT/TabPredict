@@ -1,30 +1,25 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Experiment: v1_logistic_regression
-#   Logistic Regression as the tabular backbone (replaces MLP/TabM).
-#   The sklearn model is fitted once on z-normalised clinical + raw AAA features
-#   before Stage A.  Its probability output is projected to 32-dim via a
-#   learnable Linear(1→32) which trains alongside the visual branch and FiLM
-#   fusion, so CTA information is still fully utilised.
-#
-#   Stage A: fit LR → train projection + condition_net + fusion + head
-#            (visual branch frozen)
-#   Stage B: additionally fine-tune Merlin BN layers (scanner adaptation)
+# Experiment: random_forest
+#   Random Forest as the tabular backbone (replaces MLP/TabM).
+#   Same hybrid pipeline as logistic_regression: RF fitted once pre-Stage-A, then
+#   projection + visual branch fine-tuned via backprop.
 # ─────────────────────────────────────────────────────────────────────────────
 
-name: v1_logistic_regression
+name: random_forest
 version: 1
 description: >
-  Logistic Regression tabular backbone + frozen/adapted Merlin visual branch.
-  Baseline comparison for v1_no_complications (MLP) and v1_with_complications (TabM).
+  Random Forest tabular backbone + frozen/adapted Merlin visual branch.
+  Baseline comparison for MLP and  TabM.
 
 model:
   with_complications: false
   complications: []
   aaa_dim: 5
-  clinical_backbone: lr     # triggers ClassicalBranchWrapper + pre-fit before Stage A
+  clinical_backbone: rf
   backbone_cfg:
-    C: 1.0
-    max_iter: 2000
+    n_estimators: 300
+    min_samples_leaf: 2
+    use_tree_output: false   # true → Linear(300→32) per-tree probs; false → Linear(1→32) scalar prob
 
 training:
   seed: 3299
@@ -40,18 +35,18 @@ training:
   label_smoothing: 0.02
   pos_weight: 1.0
   max_missing_pct: 0.5
-  gate_l1_weight: 0.0       # feature_gate unused for classical backbone
+  gate_l1_weight: 0.0
   recall_beta: 2.0
-  selection_metric: fbeta        # fbeta | auroc
+  selection_metric: auroc        # fbeta | auroc
   freeze_clinical_in_stage_b: true  # true → clinical branch frozen in Stage B (visual-only fine-tune)
 
   modality_dropout:
     p_cta: 0.0
     p_aaa_given_cta: 0.15
     p_aaa_given_clin: 0.15
-    p_clinical: 0.0         # classical model sees fixed pre-fitted features; no dropout needed
+    p_clinical: 0.0
 
-  xai_every_n_epochs: 999   # GradCAM/XAI not meaningful for classical tabular branch
+  xai_every_n_epochs: 999
   xai_samples: 4
   xai_gradcam: true
 
@@ -68,9 +63,9 @@ training:
 
 paths:
   base_dir:       /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/logistic_regression
+  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models_no_umcg_auroc/random_forest
 
 wandb:
   project: AAA-Reintervention-Risk-MultiTab
-  run_name: logistic_regression
+  run_name: random_forest
   mode:     online

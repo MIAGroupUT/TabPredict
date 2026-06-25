@@ -193,10 +193,10 @@ All 8 experiment configs target reintervention prediction only (primary-task, no
 
 | File | Backbone | Notes |
 |------|----------|-------|
-| `v1_no_complications_mlp.yaml` | `mlp` | Baseline |
-| `v1_no_complications_tabm.yaml` | `tabm` | TabM ensemble backbone |
-| `v1_no_complications_saint.yaml` | `saint` | Column attention only (`style='col'`) |
-| `v1_no_complications_tabpfn.yaml` | `tabpfn` | Pretrained in-context transformer |
+| `mlp.yaml` | `mlp` | Baseline |
+| `tabm.yaml` | `tabm` | TabM ensemble backbone |
+| `saint.yaml` | `saint` | Column attention only (`style='col'`) |
+| `tabpfn.yaml` | `tabpfn` | Pretrained in-context transformer |
 | `v1_logistic_regression.yaml` | `lr` | Classical: scalar probability → `Linear(1→32)` |
 | `v1_random_forest.yaml` | `rf` | Classical: scalar probability → `Linear(1→32)` (`use_tree_output: false`) |
 | `v1_gradient_boosting.yaml` | `gbm` | Classical: scalar probability → `Linear(1→32)` (`use_tree_output: false`) |

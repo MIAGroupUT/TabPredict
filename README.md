@@ -31,13 +31,13 @@ pip install -r requirements.txt
 cd /home/ranema/AI4EVAR/ai4evar_multitab
 
 # Train — MLP clinical backbone
-python scripts/train.py --config experiments/v1_no_complications_mlp.yaml
+python scripts/train.py --config experiments/mlp.yaml
 
 # Train — SAINT clinical backbone
-python scripts/train.py --config experiments/v1_no_complications_saint.yaml
+python scripts/train.py --config experiments/saint.yaml
 
 # Train — TabM clinical backbone
-python scripts/train.py --config experiments/v1_no_complications_tabm.yaml
+python scripts/train.py --config experiments/tabm.yaml
 
 # Train — classical ML backbones (LR | RF | GBM | XGBoost)
 python scripts/train.py --config experiments/v1_logistic_regression.yaml
@@ -47,13 +47,13 @@ python scripts/train.py --config experiments/v1_xgboost.yaml
 
 # Evaluate on test split
 python scripts/test.py \
-    --config     experiments/v1_no_complications_mlp.yaml \
+    --config     experiments/mlp.yaml \
     --checkpoint /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/no_complications_MLP/best_stage_b.pt \
     --output_dir /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/test_results/no_complications_MLP
 
 # Evaluate on all splits × all stage checkpoints
 python scripts/test.py \
-    --config     experiments/v1_no_complications_mlp.yaml \
+    --config     experiments/mlp.yaml \
     --output_dir /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/test_results/no_complications_MLP \
     --split all
 
@@ -65,7 +65,7 @@ Override any config value at runtime without editing the YAML:
 
 ```bash
 python scripts/train.py \
-    --config experiments/v1_no_complications_mlp.yaml \
+    --config experiments/mlp.yaml \
     --set training.batch_size=4 training.stages[0].epochs=2 wandb.mode=disabled
 ```
 
@@ -76,10 +76,10 @@ python scripts/train.py \
 ```
 ai4evar_multitab/
 ├── experiments/                          # YAML experiment configs (one per backbone)
-│   ├── v1_no_complications_mlp.yaml      # MLP backbone
-│   ├── v1_no_complications_saint.yaml    # SAINT backbone
-│   ├── v1_no_complications_tabm.yaml     # TabM backbone
-│   ├── v1_no_complications_tabpfn.yaml   # TabPFN backbone
+│   ├── mlp.yaml      # MLP backbone
+│   ├── saint.yaml    # SAINT backbone
+│   ├── tabm.yaml     # TabM backbone
+│   ├── tabpfn.yaml   # TabPFN backbone
 │   ├── v1_logistic_regression.yaml       # Logistic Regression backbone
 │   ├── v1_random_forest.yaml             # Random Forest backbone
 │   ├── v1_gradient_boosting.yaml         # Gradient Boosting backbone

@@ -1,28 +1,30 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Experiment: v1_gradient_boosting
-#   Gradient Boosting Machine as the tabular backbone (replaces MLP/TabM).
-#   Same hybrid pipeline as v1_logistic_regression/v1_random_forest.
+# Experiment: logistic_regression
+#   Logistic Regression as the tabular backbone (replaces MLP/TabM).
+#   The sklearn model is fitted once on z-normalised clinical + raw AAA features
+#   before Stage A.  Its probability output is projected to 32-dim via a
+#   learnable Linear(1→32) which trains alongside the visual branch and FiLM
+#   fusion, so CTA information is still fully utilised.
+#
+#   Stage A: fit LR → train projection + condition_net + fusion + head
+#            (visual branch frozen)
+#   Stage B: additionally fine-tune Merlin BN layers (scanner adaptation)
 # ─────────────────────────────────────────────────────────────────────────────
 
-name: v1_gradient_boosting
+name: logistic_regression
 version: 1
 description: >
-  Gradient Boosting Machine tabular backbone + frozen/adapted Merlin visual branch.
-  Baseline comparison for v1_no_complications (MLP) and v1_with_complications (TabM).
+  Logistic Regression tabular backbone + frozen/adapted Merlin visual branch.
+  Baseline comparison for MLP and TabM.
 
 model:
   with_complications: false
   complications: []
   aaa_dim: 5
-  clinical_backbone: gbm
+  clinical_backbone: lr     # triggers ClassicalBranchWrapper + pre-fit before Stage A
   backbone_cfg:
-    n_estimators: 300
-    learning_rate: 0.05
-    max_depth: 3
-    subsample: 0.8
-    max_features: 0.8
-    min_samples_leaf: 3
-    use_tree_output: false   # scalar prob → Linear(1→32); avoids overfit on small N
+    C: 1.0
+    max_iter: 2000
 
 training:
   seed: 3299
@@ -38,18 +40,18 @@ training:
   label_smoothing: 0.02
   pos_weight: 1.0
   max_missing_pct: 0.5
-  gate_l1_weight: 0.0
+  gate_l1_weight: 0.0       # feature_gate unused for classical backbone
   recall_beta: 2.0
-  selection_metric: fbeta        # fbeta | auroc
+  selection_metric: auroc        # fbeta | auroc
   freeze_clinical_in_stage_b: true  # true → clinical branch frozen in Stage B (visual-only fine-tune)
 
   modality_dropout:
     p_cta: 0.0
     p_aaa_given_cta: 0.15
     p_aaa_given_clin: 0.15
-    p_clinical: 0.0
+    p_clinical: 0.0         # classical model sees fixed pre-fitted features; no dropout needed
 
-  xai_every_n_epochs: 999
+  xai_every_n_epochs: 999   # GradCAM/XAI not meaningful for classical tabular branch
   xai_samples: 4
   xai_gradcam: true
 
@@ -66,9 +68,9 @@ training:
 
 paths:
   base_dir:       /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/gradient_boosting
+  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models_no_umcg_auroc/logistic_regression
 
 wandb:
   project: AAA-Reintervention-Risk-MultiTab
-  run_name: gradient_boosting
+  run_name: logistic_regression
   mode:     online

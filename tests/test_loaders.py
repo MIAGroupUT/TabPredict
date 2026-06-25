@@ -129,8 +129,8 @@ def test_feature_names_excludes_patient_nr(tmp_path):
     splits = {"train": ["p1"], "val": [], "test": []}
     clin_dir = tmp_path / "clinical_data"
     clin_dir.mkdir()
-    (tmp_path / "dataset_splits_multitab.json").write_text(json.dumps(splits))
-    (clin_dir / "radar_multimodal_config_v1_multitab.json").write_text(json.dumps(config))
+    (tmp_path / "dataset_splits_multitab_no_umcg.json").write_text(json.dumps(splits))
+    (clin_dir / "radar_multimodal_config_v1_multitab_no_umcg.json").write_text(json.dumps(config))
     _, _, feature_names = load_splits_and_config(tmp_path)
     assert "PatientNr" not in feature_names
     assert "age" in feature_names
@@ -193,8 +193,8 @@ def _make_fake_base_dir(tmp_path, pids=("p1", "p2"), n_features=3):
     }
     clin_dir = tmp_path / "clinical_data"
     clin_dir.mkdir()
-    (tmp_path / "dataset_splits_multitab.json").write_text(json.dumps(splits))
-    (clin_dir / "radar_multimodal_config_v1_multitab.json").write_text(json.dumps(config))
+    (tmp_path / "dataset_splits_multitab_no_umcg.json").write_text(json.dumps(splits))
+    (clin_dir / "radar_multimodal_config_v1_multitab_no_umcg.json").write_text(json.dumps(config))
     return splits, config, feat_keys
 
 
@@ -232,8 +232,8 @@ def test_load_splits_cleans_none_features(tmp_path):
     splits = {"train": ["p1"], "val": [], "test": []}
     clin_dir = tmp_path / "clinical_data"
     clin_dir.mkdir()
-    (tmp_path / "dataset_splits_multitab.json").write_text(json.dumps(splits))
-    (clin_dir / "radar_multimodal_config_v1_multitab.json").write_text(json.dumps(config))
+    (tmp_path / "dataset_splits_multitab_no_umcg.json").write_text(json.dumps(splits))
+    (clin_dir / "radar_multimodal_config_v1_multitab_no_umcg.json").write_text(json.dumps(config))
 
     _, result_config, _ = load_splits_and_config(tmp_path)
     assert np.isnan(result_config["p1"]["pre_op_features"]["a"])

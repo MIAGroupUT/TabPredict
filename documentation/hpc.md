@@ -38,14 +38,14 @@ sbatch \
     --job-name=mt_mlp \
     --output=/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/mt_mlp_%j.log \
     scripts/submit_slurm.sh train \
-    --config experiments/v1_no_complications_mlp.yaml
+    --config experiments/mlp.yaml
 ```
 
 Override config values at submission time:
 
 ```bash
 sbatch scripts/submit_slurm.sh train \
-    --config experiments/v1_no_complications_mlp.yaml \
+    --config experiments/mlp.yaml \
     --set training.batch_size=4 wandb.mode=offline
 ```
 
@@ -58,7 +58,7 @@ sbatch \
     --job-name=test_mlp \
     --output=/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/test_mlp_%j.log \
     scripts/submit_slurm.sh test \
-    --config     experiments/v1_no_complications_mlp.yaml \
+    --config     experiments/mlp.yaml \
     --checkpoint /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/no_complications_MLP/best_stage_b.pt \
     --output_dir /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/test_results/no_complications_MLP \
     --gradcam

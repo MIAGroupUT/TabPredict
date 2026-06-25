@@ -4,10 +4,10 @@ Experiments are defined by YAML files in `experiments/`. All share the same 2-st
 
 | File | Backbone | Task |
 |---|---|---|
-| `v1_no_complications_mlp.yaml` | MLP | Reintervention prediction |
-| `v1_no_complications_saint.yaml` | SAINT | Reintervention prediction |
-| `v1_no_complications_tabm.yaml` | TabM | Reintervention prediction |
-| `v1_no_complications_tabpfn.yaml` | TabPFN | Reintervention prediction |
+| `mlp.yaml` | MLP | Reintervention prediction |
+| `saint.yaml` | SAINT | Reintervention prediction |
+| `tabm.yaml` | TabM | Reintervention prediction |
+| `tabpfn.yaml` | TabPFN | Reintervention prediction |
 | `v1_logistic_regression.yaml` | Logistic Regression | Reintervention prediction |
 | `v1_random_forest.yaml` | Random Forest | Reintervention prediction |
 | `v1_gradient_boosting.yaml` | Gradient Boosting | Reintervention prediction |
@@ -129,11 +129,11 @@ Any config value can be overridden with `--set` using dot-path notation. The CLI
 
 ```bash
 # Single override
-python scripts/train.py --config experiments/v1_no_complications_mlp.yaml \
+python scripts/train.py --config experiments/mlp.yaml \
     --set training.batch_size=4
 
 # Multiple overrides
-python scripts/train.py --config experiments/v1_no_complications_mlp.yaml \
+python scripts/train.py --config experiments/mlp.yaml \
     --set training.batch_size=4 \
           training.stages[0].epochs=2 \
           wandb.mode=disabled \
@@ -152,7 +152,7 @@ Nested keys use dot notation: `training.modality_dropout.p_cta=0.5`.
 
 ## Adding a New Experiment
 
-1. Copy `experiments/v1_no_complications_mlp.yaml` to `experiments/my_experiment.yaml`
+1. Copy `experiments/mlp.yaml` to `experiments/my_experiment.yaml`
 2. Update `name`, `version`, and `paths.checkpoint_dir`
 3. Adjust any hyperparameters
 4. Run:

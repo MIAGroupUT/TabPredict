@@ -13,6 +13,21 @@ _No unreleased changes._
 
 ---
 
+## [2026-06-25] — Switch to no-UMCG data; rename YAMLs; ROC grid; PDF plots
+
+### Added
+
+- **`eval/compare_results.ipynb`** — 4×2 ROC grid cell: individual per-method subplot (no title, legend shows name + AUC), explicit row ordering (MLP, SAINT, TabM, TabPFN top; LR, RF, XGBoost, GB bottom). Saved as `ROC_grid.pdf`.
+- All plot outputs switched from PNG (raster) to **PDF** (vector) for publication quality: `ROC_all`, `Metric_comparison_bar_chart`, `AUROC_bootstrap`, `AUROC_Matrix`, `ROC_grid`, and per-run split/stage comparison plots.
+
+### Changed
+
+- **Experiment YAMLs** — renamed `v1_no_complications_<name>.yaml` → `<name>.yaml` (MLP, TabM, SAINT, TabPFN); classical YAMLs dropped `v1_` prefix. `run_name` and `checkpoint_dir` cleaned up to short names. `selection_metric` changed `fbeta` → `auroc` across all 8 configs. `checkpoint_dir` paths updated to `models_no_umcg_auroc/<NAME>`.
+- **`src/data/loaders.py`** — pipeline now reads `dataset_splits_multitab_no_umcg.json` and `radar_multimodal_config_v1_multitab_no_umcg.json`, excluding UMCG patients (zero re-intervention events) from training.
+- **`tests/test_loaders.py`** — fixture filenames updated to `_no_umcg` variants; fixes 5 previously failing tests.
+
+---
+
 ## [2026-06-24] — Add selection_metric flag; remove generate_reports; eval label cleanup
 
 ### Added
