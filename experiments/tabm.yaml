@@ -75,7 +75,7 @@ training:
 
 paths:
   base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models_no_umcg_auroc/TabM
+  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models_umcg_fbeta/TabM
 
 wandb:
   project: AAA-Reintervention-Risk-MultiTab
