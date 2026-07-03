@@ -222,12 +222,24 @@ def _enumerate_modalities(session_dir: Path) -> list[str]:
 
 
 def convert_to_nifti(dicom_dir: Path) -> sitk.Image | None:
+    """Read a DICOM series and reorient to canonical RAS.
+
+    Without this, the saved NIfTI keeps whatever direction cosines the native
+    DICOM series had (varies by scanner, patient positioning, slice order) —
+    not guaranteed consistent across patients/sites. DICOMOrient is a lossless
+    axis permutation/flip (no resampling/interpolation), and RAS matches the
+    orientation the MONAI training pipeline reorients to at load time
+    (src/data/loaders.py: Orientationd(axcodes="RAS")) — so raw NIfTIs used
+    directly by downstream steps (nnUNet, metrics, CFD) are already consistent
+    before that transform ever runs.
+    """
     reader = sitk.ImageSeriesReader()
     series_ids = reader.GetGDCMSeriesIDs(str(dicom_dir))
     if not series_ids:
         return None
     reader.SetFileNames(reader.GetGDCMSeriesFileNames(str(dicom_dir), series_ids[0]))
-    return reader.Execute()
+    img = reader.Execute()
+    return sitk.DICOMOrient(img, "RAS")
 
 
 def session_modality(session_id: str, site_abbr: str, session_dir: Path) -> str:

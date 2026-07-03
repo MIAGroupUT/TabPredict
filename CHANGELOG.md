@@ -15,6 +15,10 @@ _No unreleased changes._
 
 ## [2026-07-03] — Restore UMCG site; revert selection_metric to fbeta
 
+### Fixed
+
+- **`00_dicom_to_nifti_renaming.py`** — `convert_to_nifti()` now reorients the read DICOM series to canonical RAS via `sitk.DICOMOrient(img, "RAS")` before saving. Raw NIfTIs previously kept whatever direction cosines the source scanner/site produced, inconsistent across patients; now consistent with the `Orientationd(axcodes="RAS")` reorientation the MONAI pipeline (`src/data/loaders.py`) applies at load time, so downstream steps (nnUNet, metrics, CFD) work on already-RAS-consistent volumes.
+
 ### Changed
 
 - **UMCG site restored** — `03_data_matching_v1.py` re-enables the `"UMCG"` entry in `SITE_CONFIG` (was commented out); output filenames reverted from `_no_umcg` back to plain `radar_multimodal_config_v1_multitab.json` across `03_data_matching_v1.py`, `04_data_organizing.py`, `07_generate_data_split.py`, `src/data/loaders.py`, and `tests/test_loaders.py`.
