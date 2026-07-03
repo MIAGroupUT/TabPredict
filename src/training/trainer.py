@@ -598,7 +598,7 @@ def run_pipeline(cfg: dict) -> None:
                 train_loss += loss.item()
                 pbar.set_postfix(loss=f"{loss.item():.3f}", avg=f"{train_loss/(i+1):.3f}")
 
-            val_loss, val_metrics, _ = validate(
+            val_loss, val_metrics, (val_rp, val_rg) = validate(
                 model, val_loader, criterion, complications, size, batch_size,
                 recall_beta=recall_beta,
                 disable_cta=disable_cta,
@@ -642,16 +642,22 @@ def run_pipeline(cfg: dict) -> None:
                     size=size, batch_size=batch_size,
                 )
 
+            # "auroc": rank-based, uses all val pos/neg pairs — robust to tiny
+            #          val-positive counts; threshold still fit on val only.
+            # "fbeta": recall-weighted F-score (default); better for clinical safety
+            #          when val is large enough for a stable F-beta estimate.
             if selection_metric == "auroc":
                 val_score = val_metrics.get("val/reint_auc", 0.0)
             else:
                 val_score = val_metrics.get("val/reint_best_fbeta", 0.0)
+            save_thresh = val_metrics.get("val/reint_best_thresh", 0.5)
+
             if val_score > best_val_score:
                 best_val_score   = val_score
                 patience_counter = 0
                 ckpt_dict = {
                     "state_dict":    get_model(model).state_dict(),
-                    "threshold":     val_metrics.get("val/reint_best_thresh", 0.5),
+                    "threshold":     save_thresh,
                     "feature_names": feature_names,
                     "clin_mean":     clin_mean.tolist(),
                     "clin_std":      clin_std.tolist(),
@@ -672,7 +678,7 @@ def run_pipeline(cfg: dict) -> None:
                     f"({metric_label}, "
                     f"AUC={val_metrics.get('val/reint_auc', 0):.4f}, "
                     f"rec={val_metrics.get('val/reint_recall', 0):.4f}, "
-                    f"thresh={val_metrics.get('val/reint_best_thresh', 0):.3f}@F{recall_beta:.0f})"
+                    f"thresh={save_thresh:.3f}@F{recall_beta:.0f})"
                 )
             else:
                 patience_counter += 1

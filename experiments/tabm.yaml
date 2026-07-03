@@ -48,7 +48,7 @@ training:
   max_missing_pct: 0.5       # drop clinical features missing in ≥50% of train patients
   gate_l1_weight: 0.0001     # reduced: gate now operates on ~42 informative features, not 240
   recall_beta: 2.0
-  selection_metric: auroc        # fbeta | auroc
+  selection_metric: fbeta        # fbeta | auroc
   freeze_clinical_in_stage_b: true  # true → clinical branch frozen in Stage B (visual-only fine-tune)
 
   # Causal modality dropout — applied in BOTH Stage A and Stage B
@@ -75,9 +75,9 @@ training:
 
 paths:
   base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models_umcg_fbeta/TabM
+  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models_no_umcg_fbeta/TabM
 
 wandb:
   project: AAA-Reintervention-Risk-MultiTab
-  run_name: TabM
+  run_name: TabM_no_umcg_fbeta
   mode: online

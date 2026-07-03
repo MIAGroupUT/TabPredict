@@ -13,6 +13,18 @@ _No unreleased changes._
 
 ---
 
+## [2026-07-03] — Restore UMCG site; revert selection_metric to fbeta
+
+### Changed
+
+- **UMCG site restored** — `03_data_matching_v1.py` re-enables the `"UMCG"` entry in `SITE_CONFIG` (was commented out); output filenames reverted from `_no_umcg` back to plain `radar_multimodal_config_v1_multitab.json` across `03_data_matching_v1.py`, `04_data_organizing.py`, `07_generate_data_split.py`, `src/data/loaders.py`, and `tests/test_loaders.py`.
+- **`selection_metric`** reverted `auroc` → `fbeta` (default) across all 8 experiment YAMLs; `checkpoint_dir` moved `models_no_umcg_auroc/` → `models_no_umcg_fbeta/<NAME>` (TabM corrected from stray `models_umcg_fbeta/`); `run_name` gets `_no_umcg_fbeta` suffix.
+- **`src/training/trainer.py`** — `validate()`'s discarded third return value now captured as `(val_rp, val_rg)`; best-checkpoint threshold read once into `save_thresh` and reused for the log line; added inline comment explaining the `auroc` vs `fbeta` selection tradeoff.
+- **`scripts/submit_slurm.sh`** — `--constraint` widened from `l40` to `"l40|l40s|a40|rtx6000pro|h200nvl"` to reduce queue wait.
+- **`requirements.txt`** — dropped stray `pip install git+https://github.com/s-marton/GRANDE.git --no-deps` line after `nnunetv2==2.7.0`.
+
+---
+
 ## [2026-06-25] — Switch to no-UMCG data; rename YAMLs; ROC grid; PDF plots
 
 ### Added

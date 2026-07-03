@@ -67,9 +67,9 @@ def load_splits_and_config(base_dir: Path) -> tuple[dict, dict, list[str]]:
         config       per-patient dict from radar_multimodal_config_v1.json
         feature_names sorted list of clinical feature keys
     """
-    with open(base_dir / "dataset_splits_multitab_no_umcg.json") as f:
+    with open(base_dir / "dataset_splits_multitab.json") as f:
         splits = json.load(f)
-    with open(base_dir / "clinical_data" / "radar_multimodal_config_v1_multitab_no_umcg.json") as f:
+    with open(base_dir / "clinical_data" / "radar_multimodal_config_v1_multitab.json") as f:
         config = json.load(f)
 
     first_pid = list(config.keys())[0]

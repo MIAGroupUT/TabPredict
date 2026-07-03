@@ -84,5 +84,3 @@ six==1.17.0
 regex==2026.2.28
 nltk==3.9.3
 nnunetv2==2.7.0
-
-pip install git+https://github.com/s-marton/GRANDE.git --no-deps

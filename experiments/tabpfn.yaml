@@ -50,7 +50,7 @@ training:
   max_missing_pct: 0.5
   gate_l1_weight: 0.0001
   recall_beta: 2.0
-  selection_metric: auroc        # fbeta | auroc
+  selection_metric: fbeta        # fbeta | auroc
   freeze_clinical_in_stage_b: true  # true → clinical branch frozen in Stage B (visual-only fine-tune)
 
   modality_dropout:
@@ -76,9 +76,9 @@ training:
 
 paths:
   base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models_no_umcg_auroc/TabPFN
+  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models_no_umcg_fbeta/TabPFN
 
 wandb:
   project: AAA-Reintervention-Risk-MultiTab
-  run_name: TabPFN
+  run_name: TabPFN_no_umcg_fbeta
   mode: online

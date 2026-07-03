@@ -6,7 +6,7 @@ Combines:
   - SPSS .sav clinical database  (ground truth + clinical features)
   - session_index_v1.json        (imaging sessions from data, including scan_date)
 
-Output: radar_multimodal_config_v1_multitab_no_umcg.json
+Output: radar_multimodal_config_v1_multitab.json
 
 Pre-op / post-op classification
 --------------------------------
@@ -101,10 +101,10 @@ SITE_CONFIG = {
         "spss_site_name": "008 - AmsterdamUMC",
         "spss_id_format": lambda x: str(int(x)),
     },
-    # "UMCG": {
-    #     "spss_site_name": "009 - UMCG",
-    #     "spss_id_format": lambda x: str(int(x)),
-    # },
+    "UMCG": {
+        "spss_site_name": "009 - UMCG",
+        "spss_id_format": lambda x: str(int(x)),
+    },
     "MST": {
         "spss_site_name": "007 - Medisch Spectrum Twente (MST)",
         "spss_id_format": lambda x: str(int(x)),
@@ -419,7 +419,7 @@ def build_multimodal_dataset_v1(
     derivatives_base : str
         Root under which training_subset_v1/ will live.
     output_json : str
-        Destination for the completed radar_multimodal_config_v1_multitab_no_umcg.json.
+        Destination for the completed radar_multimodal_config_v1_multitab.json.
     cfd_renamed_dir : str | None
         Directory of renamed CFD .vtp files (output of 02_cfd_name_cleaning.py).
     """
@@ -439,8 +439,8 @@ def build_multimodal_dataset_v1(
 
     final_data = {}
     stats = {"total": 0, "matched": 0, "no_preop_ct": 0, "spss_not_found": 0, "no_op_date": 0}
-    spss_not_found_list: list[tuple[str, str]] = []
-    no_preop_ct_list:    list[tuple[str, str]] = []
+    spss_not_found_list:    list[tuple[str, str]] = []
+    no_preop_ct_list:       list[tuple[str, str]] = []
 
     for site_abbr, patients in session_index.items():
         cfg = SITE_CONFIG.get(site_abbr)
@@ -942,7 +942,7 @@ if __name__ == "__main__":
     DERIVATIVES_BASE = "/deepstore/datasets/mia/AI4EVAR/derivatives"
     OUTPUT_JSON = (
         "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1/"
-        "clinical_data/radar_multimodal_config_v1_multitab_no_umcg.json"
+        "clinical_data/radar_multimodal_config_v1_multitab.json"
     )
 
     CFD_RENAMED = "/deepstore/datasets/mia/AI4EVAR/raw_data/CFDs/renamed_v1"

@@ -35,7 +35,7 @@
 #SBATCH -c 32
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
-#SBATCH --constraint=l40
+#SBATCH --constraint="l40|l40s|a40|rtx6000pro|h200nvl"
 #SBATCH --mem=180G
 #SBATCH --time=180:00:00
 #SBATCH --partition=main,mia,mia-pof,am

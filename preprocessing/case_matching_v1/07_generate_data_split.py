@@ -41,14 +41,14 @@ def generate_split(
     base_dir : str
         training_subset_v1 root (imagesTr/ expected here).
     config_json : str
-        Path to radar_multimodal_config_v1_multitab_no_umcg.json.
+        Path to radar_multimodal_config_v1_multitab.json.
     seed : int
         Random seed for determinism.
     ratios : tuple
         (train, val, test) fractions — must sum to 1.
     """
     base_path  = Path(base_dir)
-    output_path = base_path / "dataset_splits_multitab_no_umcg.json"
+    output_path = base_path / "dataset_splits_multitab.json"
 
     with open(config_json) as f:
         config = json.load(f)
@@ -134,6 +134,6 @@ def generate_split(
 # =========================================================
 if __name__ == "__main__":
     BASE_DIR    = "/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1"
-    CONFIG_JSON = f"{BASE_DIR}/clinical_data/radar_multimodal_config_v1_multitab_no_umcg.json"
+    CONFIG_JSON = f"{BASE_DIR}/clinical_data/radar_multimodal_config_v1_multitab.json"
 
     generate_split(BASE_DIR, CONFIG_JSON, seed=3299, ratios=(0.7, 0.1, 0.2))
