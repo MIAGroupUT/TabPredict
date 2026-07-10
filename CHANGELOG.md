@@ -13,6 +13,14 @@ _No unreleased changes._
 
 ---
 
+## [2026-07-10] — Fix notebook matrix calculation of auc
+
+### Fixed
+
+- **`compare_results.ipynb`** — Matrix plot now shows exact same AUC numbers as ROC. Before it avergaed `stage_a` and `stage_b` AUC values which lead to slightly different AUCs. This is now fixed, it only uses `stage_b` AUC.
+
+---
+
 ## [2026-07-03] — Restore UMCG site; revert selection_metric to fbeta
 
 ### Fixed
