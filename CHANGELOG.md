@@ -87,7 +87,6 @@ _No unreleased changes._
 ### Removed
 
 - **Weight EMA** (`weight_ema: 0.99`) — not present on this branch; state reflects `c046247` which predates the EMA + MC-dropout + AUROC-selection additions from `4083c1f`.
-- **Stale CHANGELOG artefacts** — removed two entries referencing an unrelated `claude_goal/` foundation-model/SSL-probe codebase that is not part of this repo.
 
 ---
 
