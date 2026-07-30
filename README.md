@@ -2,14 +2,16 @@
 
 Submission to the [MICCAI 2026 MultiTab Workshop](https://multitab-miccai-2026.github.io).
 
+**Paper:** _not yet published — link coming soon_
+
 Multi-modal deep learning for post-operative re-intervention risk prediction in EVAR patients, combining CT volumes, clinical tabular data, and AAA geometry metrics from the **RADAR database** (542 AAA patients with imaging, 4 sites).
 
 **Institution:** University of Twente &nbsp;|&nbsp; **W&B project:** `AAA-Reintervention-Risk-MultiTab`
 
-[![CI](https://github.com/MIAGroupUT/ai-for-evar/actions/workflows/ci.yml/badge.svg)](https://github.com/MIAGroupUT/ai-for-evar/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/MIAGroupUT/ai-for-evar/gh-badges/tests.json)](https://github.com/MIAGroupUT/ai-for-evar/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/MIAGroupUT/ai-for-evar/gh-badges/coverage.json)](https://github.com/MIAGroupUT/ai-for-evar/actions/workflows/ci.yml)
-[![Last Commit](https://img.shields.io/github/last-commit/MIAGroupUT/ai-for-evar)](https://github.com/MIAGroupUT/ai-for-evar/commits/main)
+[![CI](https://github.com/MIAGroupUT/TabPredict/actions/workflows/ci.yml/badge.svg)](https://github.com/MIAGroupUT/TabPredict/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/MIAGroupUT/TabPredict/gh-badges/tests.json)](https://github.com/MIAGroupUT/TabPredict/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/MIAGroupUT/TabPredict/gh-badges/coverage.json)](https://github.com/MIAGroupUT/TabPredict/actions/workflows/ci.yml)
+[![Last Commit](https://img.shields.io/github/last-commit/MIAGroupUT/TabPredict)](https://github.com/MIAGroupUT/TabPredict/commits/main)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 
