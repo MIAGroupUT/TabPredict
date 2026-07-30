@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# AI4EVAR — reproducible environment
+# TabPredict — reproducible environment
 # Python 3.11  |  CUDA 12.8  |  conda env: ai4evar
 #
 # Install order:

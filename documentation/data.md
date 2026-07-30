@@ -5,12 +5,12 @@
 All processed data lives under:
 
 ```
-/deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1/
+/deepstore/datasets/mia/TabPredict/derivatives/training_subset_v1/
 ├── imagesTr/           # CTA volumes (.nii.gz), one file per patient
 ├── labelsTr/           # nnUNet segmentation masks (.nii.gz)
 │                       # label 1 = aortic lumen, label 2 = intraluminal thrombus (ILT)
 ├── distMapsTr/         # Distance maps from lumen surface (.nii.gz)
-├── cfdTr/              # CFD hemodynamics (.vtp meshes, optional)
+├── cfdTr/              # CFD hemodynamics (.vtp meshes, optional, never used in this repo)
 ├── metricsTr/          # AAA geometry metrics (.json, one file per patient)
 └── clinical_data/
     ├── radar_multimodal_config_v1_multitab.json   # per-patient clinical features + labels
@@ -19,7 +19,7 @@ All processed data lives under:
 
 Raw source data is under:
 ```
-/deepstore/datasets/mia/AI4EVAR/raw_data/RADAR_XNat/
+/deepstore/datasets/mia/TabPredict/raw_data/RADAR_XNat/
 ```
 
 ---
@@ -92,12 +92,12 @@ Raw RADAR fields are cleaned by `_clean_clinical_features` before any statistics
 
 ```
 raw 9999  →  _clean_clinical_features  →  NaN
-                                             ↓
-                               build_data_list (NaN preserved)
-                                             ↓
-                              NormalizeClinicald: z = (NaN − mean) / std  →  NaN
-                                             ↓
-                              torch.nan_to_num(nan=0.0)  →  z = 0.0 = training mean
+                                           ↓
+                            build_data_list (NaN preserved)
+                                           ↓
+                  NormalizeClinicald: z = (NaN − mean) / std  →  NaN
+                                           ↓
+                torch.nan_to_num(nan=0.0)  →  z = 0.0 = training mean
 ```
 
 Imputing to z=0 (the training mean) is the most agnostic choice: the feature carries no signal for this patient, and the L1 feature gate can cheaply zero it out without penalising the model.

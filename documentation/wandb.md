@@ -122,7 +122,7 @@ If `xai_gradcam: true`, GradCAM slices (axial, sagittal, coronal) are additional
 After a SLURM run with `wandb.mode=offline`, sync the buffered data:
 
 ```bash
-cd /home/ranema/AI4EVAR/ai4evar
+cd /home/ranema/TabPredict
 wandb sync wandb/offline-run-*/
 ```
 

@@ -3,11 +3,11 @@
 ## Running the Tests
 
 ```bash
-cd /home/ranema/AI4EVAR/ai4evar
-~/.conda/envs/ai4evar/bin/python -m pytest tests/ -v
+cd /home/ranema/TabPredict
+~/.conda/envs/tabpredict/bin/python -m pytest tests/ -v
 ```
 
-312 tests, CPU-only, no GPU required, no external data files required, ~18 seconds.
+421 tests, CPU-only, no GPU required, no external data files required, ~18 seconds.
 
 ### On SLURM
 
@@ -16,27 +16,27 @@ The suite is designed to run on any SLURM allocation — including GPU nodes. Th
 ```bash
 sbatch \
     --job-name=pytest \
-    --output=/home/ranema/AI4EVAR/logs/pytest_%j.log \
+    --output=/home/ranema/TabPredict/logs/pytest_%j.log \
     scripts/submit_slurm.sh train --config experiments/v1_no_complications.yaml
 ```
 
 Or directly on a login/CPU node (no `sbatch` needed since there is no GPU dependency):
 
 ```bash
-cd /home/ranema/AI4EVAR/ai4evar
-~/.conda/envs/ai4evar/bin/python -m pytest tests/ -v
+cd /home/ranema/TabPredict
+~/.conda/envs/tabpredict/bin/python -m pytest tests/ -v
 ```
 
 ### Single file
 
 ```bash
-~/.conda/envs/ai4evar/bin/python -m pytest tests/test_models.py -v
+~/.conda/envs/tabpredict/bin/python -m pytest tests/test_models.py -v
 ```
 
 ### Single test
 
 ```bash
-~/.conda/envs/ai4evar/bin/python -m pytest tests/test_losses.py::test_focal_bce_perfect_prediction_lower -v
+~/.conda/envs/tabpredict/bin/python -m pytest tests/test_losses.py::test_focal_bce_perfect_prediction_lower -v
 ```
 
 ---
@@ -59,7 +59,7 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 
 ---
 
-### `test_models.py` — 29 tests
+### `test_models.py` — 47 tests
 
 **Model constants:**
 - `COMPLICATIONS_FULL` has 7 entries
@@ -97,9 +97,26 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 - Additive shift `tanh(β) × 0.3` saturates to +0.3 with extreme positive β (zero input)
 - Additive shift saturates to −0.3 with extreme negative β (zero input)
 
+**TabM clinical backbone:**
+- Model builds and stores `clinical_backbone == "tabm"`
+- Forward shape correct for no-comp and with-comp variants; output finite
+- `clinical_branch` outputs `(B, 32)` regardless of backbone
+- Unknown `clinical_backbone` name raises `ValueError`
+
+**SAINT clinical backbone:**
+- Model builds for both `style="col"` and `style="colrow"`; stores `clinical_backbone == "saint"`
+- Forward shape `(B, 1)` correct and finite for both styles
+- `clinical_branch` outputs `(B, 32)` for both styles
+- SAINT is not a classical backbone (`is_classical_backbone` → `False`)
+
+**`SAINTEmbed` unit tests:**
+- Output shape `(B, 32)` for `col` and `colrow` styles
+- Finite output for both styles
+- Gradients flow back to the input (`x.grad` non-zero after `.backward()`)
+
 ---
 
-### `test_losses.py` — 18 tests
+### `test_losses.py` — 15 tests
 
 **`_focal_bce_per_sample`:**
 - Output shape preserved
@@ -123,7 +140,7 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 
 ---
 
-### `test_stages.py` — 37 tests
+### `test_stages.py` — 43 tests
 
 **`set_all_seeds`:**
 - Same seed → same random sequence
@@ -143,10 +160,13 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 
 **Stage B:** `condition_net`, `clinical_branch`, `cta_adapter`, `visual_proj` are trainable after `set_stage_b`.
 
+**Stage B — `freeze_clinical` option:** `clinical_branch` and `feature_gate` stay frozen; `visual_branch` and `condition_net` still train.
+
 **`build_optimizer`:**
 - Returns `AdamW`
 - Correct group count for Stage A (6 no-comp, 7 with-comp)
 - Correct group count for Stage B (9 no-comp, 10 with-comp)
+- Correct group count for Stage B with `freeze_clinical` (drops the clinical group entirely)
 - `i3resnet_bn` group LR is 1e-5 in Stage B
 - `feature_gate` has the highest LR in Stage A
 - Stage `"C"` raises `ValueError`
@@ -161,7 +181,7 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 
 ---
 
-### `test_loaders.py` — 88 tests
+### `test_loaders.py` — 93 tests
 
 **Clinical feature cleaning:**
 - Numeric strings → float
@@ -186,8 +206,12 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 **`compute_clin_stats`:**
 - Mean is correct
 - Std is positive
+- Sentinel values (already NaN) excluded from the mean
+- All-NaN feature → neutral stats (`mean=0, std≈1`)
 - Constant feature → std of 1.0 (safe fallback, not zero division)
 - Missing key in a patient record → defaults to 0.0
+- Third return value is the per-feature median (NaN-excluded)
+- All-NaN feature → median falls back to mean (both 0.0)
 
 **`build_data_list`:**
 - Returns a list of dicts
@@ -202,6 +226,9 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 - Each channel maps to the correct source (CT, lumen, ILT, distance)
 - `NormalizeClinicald` produces correct z-score values and tensor output
 - Zero-std features are handled safely (no NaN/inf)
+- `fill_value` (z-scored median) is used in place of NaN entries when provided
+- Without `fill_value`, NaN defaults to 0.0
+- `fill_value` only replaces NaN entries — non-NaN values are still z-scored normally
 
 **`RuntimeDataset`:**
 - `len()` is correct
@@ -357,7 +384,7 @@ Smoke tests for every public symbol exported from each package's `__all__`. Catc
 
 ---
 
-### `test_trainer.py` — 19 tests
+### `test_trainer.py` — 20 tests
 
 Tests for `validate()`, gate L1 regularisation, W&B logging helpers, and the checkpoint save format.
 
@@ -368,7 +395,7 @@ Tests for `validate()`, gate L1 regularisation, W&B logging helpers, and the che
 - All 16 required metric keys are present (`val/loss_total`, `val/reint_auc`, `val/reint_best_thresh`, confusion matrix entries, rates, ...)
 - No complication keys leak into the no-comp result
 - AUC, accuracy, and threshold are in [0, 1]; loss is non-negative
-- F-beta threshold (the deployment threshold) is in [0, 1]
+- F-beta threshold (the deployment threshold) is in [0, 1]; best F-beta score is in [0, 1]; changes with `beta`
 - All-same ground-truth produces AUC = 0.5 (graceful undefined-AUC handling)
 - `wandb.log` is called exactly once per invocation
 
@@ -409,6 +436,84 @@ Tests for `run_test()` (evaluation/runner.py) — the full inference pipeline.
 **With-complications variant (1 synthetic patient):**
 - Per-patient files created
 - `prediction.json` contains `complication_probs` dict keyed by complication name; all values in [0, 1]
+
+---
+
+### `test_baselines.py` — 72 tests
+
+Tests for `TabularBaseline` / `ClassicalBranchWrapper` (`src/models/baselines.py`) and `build_tabular_arrays` (`src/data/loaders.py`). Parametrised across all available classical model types (`lr`, `rf`, `gbm`, `xgboost` — `xgboost` skipped if not installed).
+
+**`build_tabular_arrays`:**
+- Output width is `clinical_dim + 5` AAA scalars; label and pid array shapes correct
+- NaN clinical values survive into `X` (imputation is the caller's job, not this function's)
+- Labels are binary (⊆ {0, 1})
+- Patient ID order is preserved
+
+**`TabularBaseline` — common behaviour (parametrised):**
+- `fit` + `predict_proba` returns a 1-D array of length N
+- Probabilities in [0, 1]
+- No NaN in output even with NaN inputs
+- Save/load round-trip reproduces identical probabilities
+- `predict_proba` before `fit()` raises `RuntimeError`
+- Unknown `model_type` raises `ValueError`
+- `xgboost` requested but not installed raises `ImportError` (skipped if xgboost is present)
+
+**`ClassicalBranchWrapper` (parametrised):**
+- Returns exact zeros of shape `(B, 32)` before `fit()`
+- After `fit()`: output shape `(B, 32)`, no NaN
+- Gradients flow through the projection layer after `fit()`
+- Serialize/deserialize round-trip reproduces identical probabilities
+- `is_classical_backbone()` is `True` for lr/rf/gbm/xgboost, `False` for mlp
+
+**`fit_classical_backbone` integration (parametrised):**
+- Marks `clinical_branch._fitted = True`
+- Forward pass after fitting returns non-zero `(B, 32)` output
+- NaNs in raw clinical features are **not** zeroed before reaching `branch.fit()`
+
+**Projection width — `use_tree_output`:**
+- `use_tree_output=True`: projection width is `1` (lr), `300` (rf/gbm, n_estimators), or `n_feat` (xgboost)
+- `use_tree_output=False` (default): projection is always `Linear(1→32)` for every model type
+- GBM: `_gbm_leaf_scale` is stored after `fit()` with shape `(n_estimators,)`, all values ≥ 1.0
+- `_extract_features` shape matches the active projection width for both tree and scalar modes
+
+**Imputation:**
+- XGBoost skips `_impute` — NaNs reach the model's native NaN-split handler
+- lr/rf/gbm: `_impute` fills NaNs with the training-set column median
+
+---
+
+### `test_tabm.py` — 13 tests
+
+Tests for `TabMEmbed` (`src/models/tabm.py`). Uses the real `tabm` and `rtdl_num_embeddings` packages — no mocks.
+
+- Output shape `(B, 32)` for batch sizes 1, `BATCH`, and 32
+- Deterministic output in eval mode (no stochastic dropout) — identical input gives identical output twice
+- Output is finite
+- Different `k`, `n_blocks`, `d_block` configs still produce the contracted output shape
+- `out_dim` is configurable (not hardcoded to 32)
+- `PeriodicEmbeddings` path (`num_embeddings="periodic"`, default): correct shape, deterministic, finite
+- No-embeddings path (`num_embeddings="none"`): correct shape, deterministic
+
+---
+
+### `test_tabpfn.py` — 13 tests
+
+Tests for `TabPFNBranchWrapper` (`src/models/tabpfn.py`). All CPU, synthetic data — no actual TabPFN fitting (weight download + fine-tuning is slow); covers structural correctness, differentiability markers, the zero-before-fit guard, and full-model integration.
+
+**`TabPFNBranchWrapper` structural:**
+- Builds successfully; `_fitted` is `False` initially
+- `_is_non_differentiable = False`, `_manages_own_grad = True` (differentiable, but manages its own gradient path)
+- Projection input width = `n_estimators × 2` (raw per-estimator logits for both classes); output width 32
+- `n_estimators` is stored correctly
+- Returns exact zeros of shape `(B, 32)` before fitting
+
+**`ReinterventionRiskModel` integration:**
+- Model builds with `clinical_backbone="tabpfn"`
+- Not treated as a classical backbone (`is_classical_backbone()` → `False`) — TabPFN is differentiable
+- `"tabpfn"` is absent from the sklearn `CLASSICAL_BACKBONES` list (handled via its own branch)
+- `clinical_backbone` attribute and `clinical_branch` type are stored/set correctly
+
+**Regression guard:** `is_classical_backbone()` is still `True` for `lr` and still `False` for `mlp` after the TabPFN refactor.
 
 ---
 

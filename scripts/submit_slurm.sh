@@ -1,8 +1,8 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
-# SLURM job submission — AI4EVAR training / testing
+# SLURM job submission — TabPredict training / testing
 #
-# Usage (from repo root ai4evar/):
+# Usage (from repo root TabPredict/):
 #
 #   Training:
 #     sbatch --job-name=v1_no_comp  scripts/submit_slurm.sh train \
@@ -14,24 +14,24 @@
 #   Testing — all splits × all stage checkpoints (results in <output_dir>/<split>/<stage>/):
 #     sbatch --job-name=test_no_comp scripts/submit_slurm.sh test \
 #         --config     experiments/v1_no_complications.yaml \
-#         --output_dir /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/test_results/v1_no_complications \
+#         --output_dir /deepstore/datasets/mia/AI4EVAR/TabPredict/test_results/v1_no_complications \
 #         --split all
 #
 #   Testing — single checkpoint, test split only (results in <output_dir>/test/):
 #     sbatch --job-name=test_no_comp scripts/submit_slurm.sh test \
 #         --config     experiments/v1_no_complications.yaml \
-#         --checkpoint /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/v1_no_complications/best_stage_b.pt \
-#         --output_dir /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/test_results/v1_no_complications \
+#         --checkpoint /deepstore/datasets/mia/AI4EVAR/TabPredict/models/v1_no_complications/best_stage_b.pt \
+#         --output_dir /deepstore/datasets/mia/AI4EVAR/TabPredict/test_results/v1_no_complications \
 #         --split test
 #
 #   Testing — fast metrics-only run (skip GradCAM PNGs):
 #     sbatch --job-name=test_no_comp scripts/submit_slurm.sh test \
 #         --config     experiments/v1_no_complications.yaml \
-#         --output_dir /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/test_results/v1_no_complications \
+#         --output_dir /deepstore/datasets/mia/AI4EVAR/TabPredict/test_results/v1_no_complications \
 #         --split all --no-gradcam
 # ─────────────────────────────────────────────────────────────────────────────
 
-#SBATCH --job-name=ai4evar
+#SBATCH --job-name=tabpredict
 #SBATCH -c 32
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
@@ -39,8 +39,8 @@
 #SBATCH --mem=180G
 #SBATCH --time=180:00:00
 #SBATCH --partition=main,mia,mia-pof,am
-#SBATCH --output=/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/%x_%j.log
-#SBATCH --error=/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/%x_%j.err
+#SBATCH --output=/deepstore/datasets/mia/AI4EVAR/TabPredict/logs/%x_%j.log
+#SBATCH --error=/deepstore/datasets/mia/AI4EVAR/TabPredict/logs/%x_%j.err
 
 set -euo pipefail
 
@@ -58,8 +58,8 @@ export PYTHONUNBUFFERED=1
 PYTHON="$HOME/.conda/envs/ai4evar/bin/python"
 
 # Always run from the repo root, regardless of where sbatch is called from
-cd "$HOME/AI4EVAR/ai4evar_multitab"
-mkdir -p /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs
+cd "$HOME/AI4EVAR/TabPredict"
+mkdir -p /deepstore/datasets/mia/AI4EVAR/TabPredict/logs
 
 # ── dispatch ──────────────────────────────────────────────────────────────────
 MODE="${1:-train}"

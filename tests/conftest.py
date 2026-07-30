@@ -1,5 +1,5 @@
 """
-Shared fixtures and heavy-dependency mocks for the AI4EVAR test suite.
+Shared fixtures and heavy-dependency mocks for the TabPredict test suite.
 
 merlin is patched into sys.modules BEFORE any src.* import so the
 test process never needs that package installed.  All tests run on CPU only.

@@ -31,11 +31,11 @@ The **L1 feature gate** sits between the transform and the backbone for differen
 | `saint` | `SAINTEmbed` | ✓ | ✓ | DataLoader (NaN→z-median) | Built-in (→32) | Stage A + B | ~66k (col) / ~850k (colrow) |
 | `tabpfn` | `TabPFNBranchWrapper` | Partial* | ✓ | DataLoader (NaN→z-median) | `Linear(n_est×2→32)` | Phase 1 pre-A + Phase 2 A+B | 288 (projection) + last-N blocks |
 | `lr` | `ClassicalBranchWrapper` | ✗ | ✗ | Median (TabularBaseline) | `Linear(1→32)` | Before Stage A | ~32 (projection) |
-| `rf` | `ClassicalBranchWrapper` | ✗ | ✗ | Median (TabularBaseline) | `Linear(1→32)`† | Before Stage A | ~32† (projection) |
-| `gbm` | `ClassicalBranchWrapper` | ✗ | ✗ | Median (TabularBaseline) | `Linear(1→32)`† | Before Stage A | ~32† (projection) |
-| `xgboost` | `ClassicalBranchWrapper` | ✗ | ✗ | **None** (native NaN splits) | `Linear(1→32)`† | Before Stage A | ~32† (projection) |
+| `rf` | `ClassicalBranchWrapper` | ✗ | ✗ | Median (TabularBaseline) | `Linear(1→32)`§ | Before Stage A | ~32§ (projection) |
+| `gbm` | `ClassicalBranchWrapper` | ✗ | ✗ | Median (TabularBaseline) | `Linear(1→32)`§ | Before Stage A | ~32§ (projection) |
+| `xgboost` | `ClassicalBranchWrapper` | ✗ | ✗ | **None** (native NaN splits) | `Linear(1→32)`§ | Before Stage A | ~32§ (projection) |
 
-†Default (`use_tree_output: false`). Set `use_tree_output: true` in `backbone_cfg` to use the richer per-tree representation: rf/gbm → `Linear(n_est→32)` (~9.6k params), xgboost → `Linear(n_feat→32)` (~1.5k params). Richer projections require larger datasets (>5k samples) to outperform the scalar default on RADAR.
+§Default (`use_tree_output: false`). Set `use_tree_output: true` in `backbone_cfg` to use the richer per-tree representation: rf/gbm → `Linear(n_est→32)` (~9.6k params), xgboost → `Linear(n_feat→32)` (~1.5k params). Richer projections require larger datasets (>5k samples) to outperform the scalar default on RADAR.
 
 *Last `n_trainable_layers` (default 2) transformer blocks trainable; remainder frozen.
 

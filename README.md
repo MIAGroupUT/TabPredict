@@ -6,7 +6,7 @@ Submission to the [MICCAI 2026 MultiTab Workshop](https://multitab-miccai-2026.g
 
 Multi-modal deep learning for post-operative re-intervention risk prediction in EVAR patients, combining CT volumes, clinical tabular data, and AAA geometry metrics from the **RADAR database** (542 AAA patients with imaging, 4 sites).
 
-**Institution:** University of Twente &nbsp;|&nbsp; **W&B project:** `AAA-Reintervention-Risk-MultiTab`
+**Institution:** University of Twente
 
 [![CI](https://github.com/MIAGroupUT/TabPredict/actions/workflows/ci.yml/badge.svg)](https://github.com/MIAGroupUT/TabPredict/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/MIAGroupUT/TabPredict/gh-badges/tests.json)](https://github.com/MIAGroupUT/TabPredict/actions/workflows/ci.yml)
@@ -20,7 +20,7 @@ Multi-modal deep learning for post-operative re-intervention risk prediction in 
 ## Installation
 
 ```bash
-conda activate ai4evar          # Python 3.11
+conda activate tabpredict          # Python 3.11
 export HTTPS_PROXY="http://proxy.utwente.nl:3128"   # required on HPC
 pip install -r requirements.txt
 ```
@@ -30,7 +30,7 @@ pip install -r requirements.txt
 ## Quick Start
 
 ```bash
-cd /home/ranema/AI4EVAR/ai4evar_multitab
+cd /home/ranema/TabPredict
 
 # Train — MLP clinical backbone
 python scripts/train.py --config experiments/mlp.yaml
@@ -50,17 +50,17 @@ python scripts/train.py --config experiments/v1_xgboost.yaml
 # Evaluate on test split
 python scripts/test.py \
     --config     experiments/mlp.yaml \
-    --checkpoint /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/no_complications_MLP/best_stage_b.pt \
-    --output_dir /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/test_results/no_complications_MLP
+    --checkpoint /deepstore/datasets/mia/TabPredict/models/no_complications_MLP/best_stage_b.pt \
+    --output_dir /deepstore/datasets/mia/TabPredict/test_results/no_complications_MLP
 
 # Evaluate on all splits × all stage checkpoints
 python scripts/test.py \
     --config     experiments/mlp.yaml \
-    --output_dir /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/test_results/no_complications_MLP \
+    --output_dir /deepstore/datasets/mia/TabPredict/test_results/no_complications_MLP \
     --split all
 
-# Run tests (420 tests, CPU-only, ~20 s)
-~/.conda/envs/ai4evar/bin/python -m pytest tests/ -v
+# Run tests (421 tests, CPU-only, ~20 s)
+~/.conda/envs/tabpredict/bin/python -m pytest tests/ -v
 ```
 
 Override any config value at runtime without editing the YAML:
@@ -76,7 +76,7 @@ python scripts/train.py \
 ## Repository Structure
 
 ```
-ai4evar_multitab/
+TabPredict/
 ├── experiments/                          # YAML experiment configs (one per backbone)
 │   ├── mlp.yaml      # MLP backbone
 │   ├── saint.yaml    # SAINT backbone
@@ -97,7 +97,7 @@ ai4evar_multitab/
 │   ├── xai/                              # Gradient-based explainability
 │   └── evaluation/                       # Metrics + per-patient output
 ├── preprocessing/                        # Data preparation pipeline (00–07)
-├── tests/                                # CPU-only pytest suite (420 tests)
+├── tests/                                # CPU-only pytest suite (421 tests)
 └── documentation/                        # Technical documentation
 ```
 

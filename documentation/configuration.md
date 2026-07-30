@@ -53,7 +53,7 @@ training:
   # num_workers: DataLoader workers (default 4)
   image_size: [224, 224, 160] # spatial dimensions after preprocessing
   voxel_spacing: [1.5, 1.5, 3]    # resampling target (mm); matches Merlin's pretrained geometry
-  hu_range: [-1000, 1000]      # HU clip range for CT intensity scaling
+  hu_range: [-1000, 1000]     # HU clip range for CT intensity scaling
 
   # Loss parameters
   focal_gamma: 2.0            # focal loss exponent (down-weights easy negatives)
@@ -111,8 +111,8 @@ training:
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 paths:
-  base_dir: /deepstore/datasets/mia/AI4EVAR/derivatives/training_subset_v1
-  checkpoint_dir: /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/no_complications_MLP
+  base_dir: /deepstore/datasets/mia/TabPredict/derivatives/training_subset_v1
+  checkpoint_dir: /deepstore/datasets/mia/TabPredict/models/no_complications_MLP
 
 # ── W&B ───────────────────────────────────────────────────────────────────────
 wandb:

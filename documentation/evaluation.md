@@ -7,8 +7,8 @@
 ```bash
 python scripts/test.py \
     --config     experiments/mlp.yaml \
-    --checkpoint /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/no_complications_MLP/best_stage_b.pt \
-    --output_dir /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/test_results/no_complications_MLP \
+    --checkpoint /deepstore/datasets/mia/TabPredict/models/no_complications_MLP/best_stage_b.pt \
+    --output_dir /deepstore/datasets/mia/TabPredict/test_results/no_complications_MLP \
     [--split     test]      # "train" | "val" | "test" (default: "test")
     [--gradcam]             # also compute and save GradCAM PNGs (slower)
     [--workers   8]         # DataLoader workers
@@ -21,8 +21,8 @@ The checkpoint contains all necessary normalisation stats (`clin_mean`, `clin_st
 ```bash
 sbatch --job-name=test_no_comp scripts/submit_slurm.sh test \
     --config     experiments/mlp.yaml \
-    --checkpoint /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models/no_complications_MLP/best_stage_b.pt \
-    --output_dir /deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/test_results/no_complications_MLP \
+    --checkpoint /deepstore/datasets/mia/TabPredict/models/no_complications_MLP/best_stage_b.pt \
+    --output_dir /deepstore/datasets/mia/TabPredict/test_results/no_complications_MLP \
     --gradcam
 ```
 

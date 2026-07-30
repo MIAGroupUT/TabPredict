@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
-# Make scripts/ importable from the repo root (ai4evar/)
+# Make scripts/ importable from the repo root (TabPredict/)
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 

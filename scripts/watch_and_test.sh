@@ -14,9 +14,9 @@ POLL=1800   # seconds between polls
 LOG="/home/ranema/AI4EVAR/watch_and_test.log"
 DONE_FILE="/home/ranema/AI4EVAR/.watch_tested"  # one tested experiment per line
 
-MT_REPO="/home/ranema/AI4EVAR/ai4evar_multitab"
+MT_REPO="/home/ranema/AI4EVAR/TabPredict"
 
-CKPT_BASE_MT="/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/models_fbeta"
+CKPT_BASE_MT="/deepstore/datasets/mia/AI4EVAR/TabPredict/models_fbeta"
 TEST_BASE_MT="/home/ranema/AI4EVAR/test_results_fbeta"
 
 # Format: "key|repo|config|job_name|ckpt_dir|test_output_dir"

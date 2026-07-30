@@ -1,12 +1,12 @@
 # Preprocessing Pipeline (v1)
 
 All scripts live in `preprocessing/case_matching_v1/` and must be run in order.
-Each step reads from and writes to `/deepstore/datasets/mia/AI4EVAR/`.
+Each step reads from and writes to `/deepstore/datasets/mia/TabPredict/`.
 
 ```
 Raw XNAT data  ──►  00  ──►  01  ──►  02  ──►  03  ──►  04  ──►  05  ──►  06  ──►  07
-DICOM on disk      NIfTI   Session  CFD      Config   Organise  nnUNet   Crop    Split
-                   convert  index   rename   JSIndex DON     files     + AAA    SI      JSON
+DICOM on disk      NIfTI   Session   CFD     Config  Organise  nnUNet    Crop     Split
+                   convert  index   rename   JSIndex  files    + AAA      SI      JSON
 ```
 
 ---

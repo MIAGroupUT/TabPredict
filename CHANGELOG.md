@@ -52,7 +52,7 @@ _No unreleased changes._
 
 ---
 
-## [2026-06-24] — Add selection_metric flag; remove generate_reports; eval label cleanup
+## [2026-06-24] — Add selection_metric flag; eval label cleanup
 
 ### Added
 
@@ -61,10 +61,6 @@ _No unreleased changes._
 ### Changed
 
 - **`eval/compare_results.ipynb`** — model display labels shortened: "Logistic Regression" → "LR", "Random Forest" → "RF", "GradientBoosting" → "GB".
-
-### Removed
-
-- **`preprocessing/generate_reports/`** — deleted LLM-based radiology report generation scripts (`generate_reports.py`, `run_reports.sh`, `test_mistral_download.py`); Mistral-based report generation is no longer part of the pipeline.
 
 ---
 
@@ -79,8 +75,8 @@ _No unreleased changes._
 - **`03_data_matching_v1.py`** — Vascutek Anaconda device type (P_IP_P_DT=9) no longer excluded; all device types are now included in the matched dataset.
 - **Output filenames** — preprocessing and training pipeline now writes `_multitab`-suffixed files to avoid overwriting the v1 dataset: `radar_multimodal_config_v1_multitab.json`, `radar_multimodal_config_v1_multitab_analysis.txt`, `dataset_splits_multitab.json`. Affects `03_data_matching_v1.py`, `04_data_organizing.py`, `07_generate_data_split.py`, and `src/data/loaders.py`.
 - **Experiment `run_name` fields** — date suffix `_17062026` removed from all 9 experiment YAMLs for clean W&B run naming. `v1_` prefix also stripped from `run_name` and `checkpoint_dir` values in all 10 configs (e.g. `v1_no_complications_MLP` → `no_complications_MLP`).
-- **All output paths consolidated under deepstore** — logs → `/deepstore/datasets/mia/AI4EVAR/ai4evar_multitab/logs/`, preprocessing logs → `.../logs/preprocessing_v1_multitab/`, models → `.../models/`, test results → `.../test_results/`. Updated in `submit_slurm.sh`, `prepare_data.sh`, and all experiment YAMLs.
-- **`submit_slurm.sh`** — `cd` path updated to `ai4evar_multitab`; example checkpoint and test-result paths reflect new deepstore layout.
+- **All output paths consolidated under deepstore** — logs → `/deepstore/datasets/mia/TabPredict/logs/`, preprocessing logs → `.../logs/preprocessing_v1_multitab/`, models → `.../models/`, test results → `.../test_results/`. Updated in `submit_slurm.sh`, `prepare_data.sh`, and all experiment YAMLs.
+- **`submit_slurm.sh`** — `cd` path updated to `TabPredict`; example checkpoint and test-result paths reflect new deepstore layout.
 - **`documentation/data.md`** — all filename references updated to `_multitab` variants.
 - **`tests/test_loaders.py`** — fixture filenames updated to `_multitab` suffix (5 tests were failing after loader path change).
 
@@ -217,7 +213,7 @@ _No unreleased changes._
 
 ### Added
 
-- **`TabPFNBranchWrapper.model_dir`** — new `__init__` parameter. Globs `tabpfn-v2.5-classifier*.ckpt` from a local directory and passes the canonical **`_default.ckpt`** (matching `ModelSource.get_classifier_v2_5().default_filename`) as a single path string to `FinetunedTabPFNClassifier`, bypassing HuggingFace and `TabPFNLicenseError`. Weights at `/deepstore/datasets/mia/AI4EVAR/checkpoints/tabpfn/` (9 v2.5 checkpoints). Configured via `backbone_cfg.model_dir` in `experiments/v1_no_complications_tabpfn.yaml`. **Why single checkpoint**: passing a list triggers multi-model mode in `TabPFNClassifier`; `FinetunedTabPFNClassifier._fit` then calls `self.finetuned_estimator_.model_.to(device)` which raises `ValueError: The model_ property is not supported when multiple models are used`. `n_estimators_final_inference=4` still ensembles via different preprocessing seeds over the one fine-tuned model.
+- **`TabPFNBranchWrapper.model_dir`** — new `__init__` parameter. Globs `tabpfn-v2.5-classifier*.ckpt` from a local directory and passes the canonical **`_default.ckpt`** (matching `ModelSource.get_classifier_v2_5().default_filename`) as a single path string to `FinetunedTabPFNClassifier`, bypassing HuggingFace and `TabPFNLicenseError`. Weights at `/deepstore/datasets/mia/TabPredict/checkpoints/tabpfn/` (9 v2.5 checkpoints). Configured via `backbone_cfg.model_dir` in `experiments/v1_no_complications_tabpfn.yaml`. **Why single checkpoint**: passing a list triggers multi-model mode in `TabPFNClassifier`; `FinetunedTabPFNClassifier._fit` then calls `self.finetuned_estimator_.model_.to(device)` which raises `ValueError: The model_ property is not supported when multiple models are used`. `n_estimators_final_inference=4` still ensembles via different preprocessing seeds over the one fine-tuned model.
 - **`compute_clin_stats`** now returns a third value — per-feature **median** (shape `(n_features,)`, float32). All-NaN features fall back to the mean. Used to compute `clin_fill = (median − mean) / std` (z-scored median), the new NaN fill value for `NormalizeClinicald`.
 - **`NormalizeClinicald.fill_value`** — optional per-feature `np.ndarray` (in z-space). When provided, missing values are replaced by the z-scored median instead of 0 (mean). Falls back to `nan_to_num(..., nan=0.0)` when `None` for backward compatibility. Wired through `get_train/val_runtime_transforms` and `build_loaders` via a new `clin_fill` parameter.
 - **9 new tests** in `tests/test_loaders.py`: `test_compute_clin_stats_returns_median`, `test_compute_clin_stats_all_nan_median_falls_back_to_mean`, `test_normalize_clinical_fill_value_used_for_nan`, `test_normalize_clinical_no_fill_defaults_to_zero`, `test_normalize_clinical_fill_value_only_replaces_nan`.

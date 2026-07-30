@@ -1,5 +1,5 @@
 """
-AI4EVAR — AAA Reintervention Risk Prediction
+TabPredict — AAA Reintervention Risk Prediction
 
 ZonMw MedZO 2024 · University of Twente.
 

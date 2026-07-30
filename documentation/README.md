@@ -65,5 +65,5 @@ Reading XAI output?   → XAI
 | AAA geometry scalars | 5 |
 | CTA input shape | 4 × 224 × 224 × 160 (CT + lumen + ILT + dist map) |
 | Fusion dim | 288 (256 visual + 32 tabular) |
-| Test suite | 420 tests, CPU-only, ~20 s |
+| Test suite | 421 tests, CPU-only, ~20 s |
 | W&B project | `AAA-Reintervention-Risk-MultiTab` |

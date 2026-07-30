@@ -10,10 +10,10 @@ CTA volume (4-ch, 224×224×160)
     → Merlin I3ResNet (frozen, BN adapted in Stage B)
     → visual_proj (Linear 2048→256)           → 256-dim visual embedding ─────┐
                                                                               │
-Clinical tabular (~42 features, z-normalised, filtered from 240 raw)         │
-    → feature_gate (per-feature sigmoid) [DL backbones only]                 │
+Clinical tabular (~42 features, z-normalised, filtered from 240 raw)          │
+    → feature_gate (per-feature sigmoid) [DL backbones only]                  │
     → cat with AAA geometry (5 scalars, no gate)                              │
-    → clinical_branch (MLP | TabM | LR | RF | GBM | XGBoost → 32-dim)       │
+    → clinical_branch (MLP | TabM | LR | RF | GBM | XGBoost → 32-dim)         │
                                           → 32-dim tabular embedding ─────────┘
                                                         │
                                           cat → 288-dim fused representation
@@ -78,14 +78,14 @@ Derived from nnUNet segmentation masks by `preprocessing/case_matching_v1/05_nnU
 
 ```yaml
 model:
-  clinical_backbone: tabm   # mlp (default) | tabm | lr | rf | gbm | xgboost
+  clinical_backbone: tabm       # mlp (default) | tabm | lr | rf | gbm | xgboost
   backbone_cfg:
-    k: 16                   # ensemble members
-    n_blocks: 2             # MLP depth per member
-    d_block: 64             # hidden width per member (halved from 128; ~4k params/positive)
+    k: 16                       # ensemble members
+    n_blocks: 2                 # MLP depth per member
+    d_block: 64                 # hidden width per member (halved from 128; ~4k params/positive)
     dropout: 0.3
-    num_embeddings: periodic  # periodic (default) | none
-    d_embedding: 8            # embedding dim per feature (halved from 16 to match d_block)
+    num_embeddings: periodic    # periodic (default) | none
+    d_embedding: 8              # embedding dim per feature (halved from 16 to match d_block)
 ```
 
 To benchmark without editing the YAML:
