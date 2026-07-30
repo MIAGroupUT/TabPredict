@@ -14,20 +14,20 @@
 #   Testing — all splits × all stage checkpoints (results in <output_dir>/<split>/<stage>/):
 #     sbatch --job-name=test_no_comp scripts/submit_slurm.sh test \
 #         --config     experiments/v1_no_complications.yaml \
-#         --output_dir /deepstore/datasets/mia/AI4EVAR/TabPredict/test_results/v1_no_complications \
+#         --output_dir /deepstore/datasets/mia/TabPredict/test_results/v1_no_complications \
 #         --split all
 #
 #   Testing — single checkpoint, test split only (results in <output_dir>/test/):
 #     sbatch --job-name=test_no_comp scripts/submit_slurm.sh test \
 #         --config     experiments/v1_no_complications.yaml \
-#         --checkpoint /deepstore/datasets/mia/AI4EVAR/TabPredict/models/v1_no_complications/best_stage_b.pt \
-#         --output_dir /deepstore/datasets/mia/AI4EVAR/TabPredict/test_results/v1_no_complications \
+#         --checkpoint /deepstore/datasets/mia/TabPredict/models/v1_no_complications/best_stage_b.pt \
+#         --output_dir /deepstore/datasets/mia/TabPredict/test_results/v1_no_complications \
 #         --split test
 #
 #   Testing — fast metrics-only run (skip GradCAM PNGs):
 #     sbatch --job-name=test_no_comp scripts/submit_slurm.sh test \
 #         --config     experiments/v1_no_complications.yaml \
-#         --output_dir /deepstore/datasets/mia/AI4EVAR/TabPredict/test_results/v1_no_complications \
+#         --output_dir /deepstore/datasets/mia/TabPredict/test_results/v1_no_complications \
 #         --split all --no-gradcam
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -39,8 +39,8 @@
 #SBATCH --mem=180G
 #SBATCH --time=180:00:00
 #SBATCH --partition=main,mia,mia-pof,am
-#SBATCH --output=/deepstore/datasets/mia/AI4EVAR/TabPredict/logs/%x_%j.log
-#SBATCH --error=/deepstore/datasets/mia/AI4EVAR/TabPredict/logs/%x_%j.err
+#SBATCH --output=/deepstore/datasets/mia/TabPredict/logs/%x_%j.log
+#SBATCH --error=/deepstore/datasets/mia/TabPredict/logs/%x_%j.err
 
 set -euo pipefail
 
@@ -55,11 +55,11 @@ export CUDA_LAUNCH_BLOCKING=0
 export TORCH_CUDNN_V8_API_ENABLED=1
 export PYTHONUNBUFFERED=1
 
-PYTHON="$HOME/.conda/envs/ai4evar/bin/python"
+PYTHON="$HOME/.conda/envs/tabpredict/bin/python"
 
 # Always run from the repo root, regardless of where sbatch is called from
-cd "$HOME/AI4EVAR/TabPredict"
-mkdir -p /deepstore/datasets/mia/AI4EVAR/TabPredict/logs
+cd "$HOME/TabPredict"
+mkdir -p /deepstore/datasets/mia/TabPredict/logs
 
 # ── dispatch ──────────────────────────────────────────────────────────────────
 MODE="${1:-train}"

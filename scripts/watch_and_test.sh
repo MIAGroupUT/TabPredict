@@ -1,23 +1,23 @@
 #!/bin/bash
 # Watch training jobs (multitab) and auto-submit test jobs on completion.
-# Run inside tmux: bash /home/ranema/AI4EVAR/watch_and_test.sh
+# Run inside tmux: bash /home/ranema/TabPredict/watch_and_test.sh
 #
 # Logic per experiment:
 #   1. test_output_dir contains metrics.json  → already tested, skip
 #   2. job_name still in squeue               → still training, wait
-#   3. best_stage_b.pt exists in ckpt_dir    → training done, submit test
+#   3. best_stage_b.pt exists in ckpt_dir     → training done, submit test
 #   4. none of above                          → training failed / not started, skip
 
 set -euo pipefail
 
 POLL=1800   # seconds between polls
-LOG="/home/ranema/AI4EVAR/watch_and_test.log"
-DONE_FILE="/home/ranema/AI4EVAR/.watch_tested"  # one tested experiment per line
+LOG="/home/ranema/TabPredict/watch_and_test.log"
+DONE_FILE="/home/ranema/TabPredict/.watch_tested"  # one tested experiment per line
 
-MT_REPO="/home/ranema/AI4EVAR/TabPredict"
+MT_REPO="/home/ranema/TabPredict"
 
-CKPT_BASE_MT="/deepstore/datasets/mia/AI4EVAR/TabPredict/models_fbeta"
-TEST_BASE_MT="/home/ranema/AI4EVAR/test_results_fbeta"
+CKPT_BASE_MT="/deepstore/datasets/mia/TabPredict/models_fbeta"
+TEST_BASE_MT="/home/ranema/TabPredict/test_results_fbeta"
 
 # Format: "key|repo|config|job_name|ckpt_dir|test_output_dir"
 EXPERIMENTS=(
