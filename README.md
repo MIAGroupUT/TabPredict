@@ -1,8 +1,8 @@
 # Multi-Modal Risk Prediction for EndoVascular Aneurysm Repair
 
-Submission to the [MICCAI 2026 MultiTab Workshop](https://multitab-miccai-2026.github.io).
+Published at the [MICCAI 2026 MultiTab Workshop](https://multitab-miccai-2026.github.io):
 
-**Paper:** _not yet published — link coming soon_
+[![Paper](https://img.shields.io/badge/Paper-MultiTab%20%40%20MICCAI%202026-6f42c1?logo=adobeacrobatreader&logoColor=white)](https://papers.miccai.org/miccai-2026-sat/paper/MultiTab_017.pdf)
 
 Multi-modal deep learning for post-operative re-intervention risk prediction in EVAR patients, combining CT volumes, clinical tabular data, and AAA geometry metrics from the **RADAR database** (542 AAA patients with imaging, 4 sites).
 
@@ -14,6 +14,8 @@ Multi-modal deep learning for post-operative re-intervention risk prediction in 
 [![Last Commit](https://img.shields.io/github/last-commit/MIAGroupUT/TabPredict)](https://github.com/MIAGroupUT/TabPredict/commits/main)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
+
+Multi-modal deep learning for post-operative re-intervention risk prediction in EVAR patients, combining CT volumes, clinical tabular data, and AAA geometry metrics from the **RADAR database** (542 AAA patients with imaging, 4 sites).
 
 ---
 
